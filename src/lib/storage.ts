@@ -322,12 +322,16 @@ export class AppStore {
         });
         novasMensagens.push(msg);
       }
+
+      // REGRA OFICIAL: Não houve ganhador -> zera os bilhetes no sistema para iniciar a nova venda
+      localStorage.setItem(STORAGE_KEYS.BILHETES, JSON.stringify([]));
     }
 
     const sorteioFinalizado: Sorteio = {
       ...sorteio,
       numeros_sorteados: milharSorteado,
       ganhador_id: ganhador ? ganhador.id : null,
+      premio: novoPremio,
       status: 'finalizado',
       acumulado: acumulou,
       ganhador
@@ -373,16 +377,20 @@ export class AppStore {
   }
 
   /**
-   * Reseta o ciclo para o próximo sorteio (novo dia)
+   * Reseta o ciclo para o próximo sorteio (novo dia) e zera os bilhetes para a nova venda
    */
   static startNewDrawCycle(carryOverPrize?: number): Sorteio {
     const sorteioAnterior = this.getSorteio();
     let premioInicial = 500;
+
     if (carryOverPrize !== undefined) {
       premioInicial = carryOverPrize;
     } else if (sorteioAnterior.acumulado) {
-      premioInicial = sorteioAnterior.premio + 500;
+      premioInicial = sorteioAnterior.premio;
     }
+
+    // REGRA OFICIAL: Zera os bilhetes comprados do ciclo anterior para iniciar a nova venda
+    localStorage.setItem(STORAGE_KEYS.BILHETES, JSON.stringify([]));
 
     const amanha = new Date();
     amanha.setDate(amanha.getDate() + 1);

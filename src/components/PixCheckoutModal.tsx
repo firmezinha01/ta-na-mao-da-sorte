@@ -19,6 +19,7 @@ import {
 import confetti from 'canvas-confetti';
 import { PixPaymentData, Usuario } from '@/types';
 import { sounds } from '@/lib/sound';
+import { isSalesCutoffActive } from '@/lib/drawTime';
 
 interface PixCheckoutModalProps {
   isOpen: boolean;
@@ -37,12 +38,15 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   testMode,
   onPaymentComplete
 }) => {
+  // Todos os hooks declarados no topo absoluto do componente
   const [step, setStep] = useState<'payment' | 'registration' | 'success'>('payment');
   const [pixData, setPixData] = useState<PixPaymentData | null>(null);
   const [loadingPix, setLoadingPix] = useState(true);
+  const [pixError, setPixError] = useState('');
   const [copied, setCopied] = useState(false);
   const [isProcessingApproval, setIsProcessingApproval] = useState(false);
   const [isCheckingAuto, setIsCheckingAuto] = useState(false);
+  const [isSavingParticipant, setIsSavingParticipant] = useState(false);
 
   const [nomeCompleto, setNomeCompleto] = useState('');
   const [cpf, setCpf] = useState('');
@@ -52,11 +56,44 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Inicializa e gera o Pix ao abrir o modal
+  const fetchPix = async () => {
+    if (selectedNumbers.length === 0) return;
+    setLoadingPix(true);
+    setPixError('');
+    try {
+      const response = await fetch('/api/pix/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tickets: selectedNumbers,
+          amount: selectedNumbers.length * 2.00,
+          payerName: currentUser?.nome_completo,
+          payerCpf: currentUser?.cpf,
+          testMode
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPixData(data);
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        setPixError(errData.error || 'Não foi possível gerar a cobrança Pix. Tente novamente.');
+      }
+    } catch (err) {
+      console.error('Erro ao gerar Pix:', err);
+      setPixError('Falha na conexão ao gerar o Pix. Verifique sua internet.');
+    } finally {
+      setLoadingPix(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen || selectedNumbers.length === 0) return;
 
     setStep('payment');
     setFormError('');
+    setPixError('');
     setCopied(false);
     setIsCheckingAuto(false);
 
@@ -65,32 +102,6 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       setCpf(currentUser.cpf || '');
       setWhatsapp(currentUser.whatsapp || '');
     }
-
-    const fetchPix = async () => {
-      setLoadingPix(true);
-      try {
-        const response = await fetch('/api/pix/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tickets: selectedNumbers,
-            amount: selectedNumbers.length * 2.00,
-            payerName: currentUser?.nome_completo,
-            payerCpf: currentUser?.cpf,
-            testMode
-          })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setPixData(data);
-        }
-      } catch (err) {
-        console.error('Erro ao gerar Pix:', err);
-      } finally {
-        setLoadingPix(false);
-      }
-    };
 
     fetchPix();
 
@@ -112,11 +123,15 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
           if (result.status === 'approved') {
             if (pollingRef.current) clearInterval(pollingRef.current);
             sounds.playWinFanfare();
-            confetti({
-              particleCount: 120,
-              spread: 80,
-              origin: { y: 0.6 }
-            });
+            try {
+              confetti({
+                particleCount: 120,
+                spread: 80,
+                origin: { y: 0.6 }
+              });
+            } catch (e) {
+              console.warn('Confetti error:', e);
+            }
             setStep('registration');
           }
         }
@@ -134,20 +149,74 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     };
   }, [step, pixData]);
 
+  // Retorno imediato seguro se o modal não estiver aberto
   if (!isOpen) return null;
+
+  // Bloqueio das 18:55 às 19:05 (Regra Oficial: última compra até as 18:55)
+  if (isSalesCutoffActive()) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md">
+        <div className="relative w-full max-w-md bg-slate-900 border border-amber-500/40 rounded-3xl p-6 text-center space-y-4 shadow-2xl">
+          <div className="w-14 h-14 bg-amber-500/20 text-amber-400 rounded-2xl mx-auto flex items-center justify-center border border-amber-500/30">
+            <Clock className="w-7 h-7 animate-pulse" />
+          </div>
+          <h3 className="text-lg font-black text-white">Vendas Encerradas para o Sorteio de Hoje</h3>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            A última compra pode ser feita até as <strong>18:55h</strong> de cada dia. O sorteio oficial acontece às <strong>19:00h</strong>.
+          </p>
+          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs text-emerald-300 font-semibold">
+            🍀 As vendas para a próxima rodada reabrirão logo após o sorteio!
+          </div>
+          <button
+            onClick={onClose}
+            className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-colors"
+          >
+            Fechar e Acompanhar Sorteio
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const totalAmount = selectedNumbers.length * 2.00;
 
-  // Copia a Chave Pix Copia e Cola
+  // Cópia resiliente e à prova de falhas da Chave Pix
   const handleCopyPix = () => {
     if (!pixData?.copyPaste) return;
-    navigator.clipboard.writeText(pixData.copyPaste);
-    setCopied(true);
-    sounds.playClick();
-    setTimeout(() => setCopied(false), 3000);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(pixData.copyPaste).catch(() => {
+          fallbackCopyText(pixData.copyPaste);
+        });
+      } else {
+        fallbackCopyText(pixData.copyPaste);
+      }
+      setCopied(true);
+      sounds.playClick();
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      fallbackCopyText(pixData.copyPaste);
+      setCopied(true);
+    }
   };
 
-  // Simula ou força a aprovação
+  const fallbackCopyText = (text: string) => {
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-9999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+    } catch (e) {
+      console.warn('Fallback copy error:', e);
+    }
+  };
+
+  // Simula ou força a aprovação (Ambiente de Teste)
   const handleApprovePayment = () => {
     setIsProcessingApproval(true);
     sounds.playDigitLock();
@@ -182,8 +251,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     setWhatsapp(v);
   };
 
-  const [isSavingParticipant, setIsSavingParticipant] = useState(false);
-
+  // Envio do formulário do participante
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nomeCompleto.trim() || nomeCompleto.trim().split(' ').length < 2) {
@@ -236,11 +304,15 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     });
 
     sounds.playWinFanfare();
-    confetti({
-      particleCount: 100,
-      spread: 70,
-      origin: { y: 0.6 }
-    });
+    try {
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 }
+      });
+    } catch (e) {
+      console.warn('Confetti error:', e);
+    }
 
     setStep('success');
   };
@@ -262,14 +334,11 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                   {step === 'registration' && 'Dados do Participante'}
                   {step === 'success' && 'Participação Confirmada! 🎉'}
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  Mercado Pago
-                </span>
               </div>
               <p className="text-[11px] sm:text-xs text-emerald-300/80">
-                {step === 'payment' && 'QR Code & Chave Copia e Cola oficial'}
-                {step === 'registration' && 'Necessário para contato e pagamento do prêmio'}
-                {step === 'success' && 'Bilhetes oficiais registrados com sucesso'}
+                {step === 'payment' && 'QR Code Oficial Mercado Pago • Aprovação Instantânea'}
+                {step === 'registration' && 'Vincule seus bilhetes ao seu Nome, CPF e WhatsApp'}
+                {step === 'success' && 'Você já está concorrendo ao sorteio de hoje às 19:00h'}
               </p>
             </div>
           </div>
@@ -282,20 +351,22 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
           </button>
         </div>
 
-        {/* Corpo com scroll */}
-        <div className="overflow-y-auto flex-1 p-4 sm:p-6">
+        {/* Corpo do Modal */}
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1">
           
           {/* PASSO 1: PAGAMENTO PIX */}
           {step === 'payment' && (
-            <div>
+            <div className="space-y-4">
               
               {/* Resumo da Compra */}
-              <div className="bg-slate-950/80 rounded-2xl p-3.5 border border-emerald-900/50 mb-4 flex items-center justify-between">
+              <div className="bg-slate-950/80 rounded-2xl p-3 sm:p-4 border border-slate-800 flex items-center justify-between">
                 <div>
-                  <span className="text-[11px] text-slate-400 font-medium">Milhar(es) Selecionada(s):</span>
+                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold tracking-wider">
+                    Bilhetes Selecionados:
+                  </span>
                   <div className="flex items-center gap-1.5 flex-wrap mt-1">
                     {selectedNumbers.slice(0, 6).map(n => (
-                      <span key={n} className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs border border-emerald-500/40">
+                      <span key={n} className="px-2 py-0.5 bg-emerald-500/10 text-emerald-300 font-mono font-bold text-xs rounded-md border border-emerald-500/30">
                         {n}
                       </span>
                     ))}
@@ -319,6 +390,19 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 <div className="flex flex-col items-center justify-center py-12 gap-3">
                   <div className="w-9 h-9 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
                   <p className="text-xs text-slate-400">Gerando cobrança Pix oficial no Mercado Pago...</p>
+                </div>
+              ) : pixError ? (
+                <div className="py-8 text-center space-y-3">
+                  <div className="w-12 h-12 bg-red-500/20 text-red-400 rounded-2xl mx-auto flex items-center justify-center border border-red-500/30">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <p className="text-xs text-red-300">{pixError}</p>
+                  <button
+                    onClick={fetchPix}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors"
+                  >
+                    Tentar Novamente
+                  </button>
                 </div>
               ) : pixData ? (
                 <div className="flex flex-col items-center text-center">

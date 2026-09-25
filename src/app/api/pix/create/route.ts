@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server';
 import { createPixPayment } from '@/lib/mercadopago';
+import { isSalesCutoffActive } from '@/lib/drawTime';
 
 export async function POST(request: Request) {
   try {
+    // REGRA OFICIAL: A última compra de cada dia pode ser feita até as 18:55h.
+    // Entre 18:55 e as 19:05, as vendas ficam suspensas para a realização do sorteio das 19h.
+    if (isSalesCutoffActive()) {
+      return NextResponse.json(
+        { 
+          error: 'Vendas encerradas temporariamente para o sorteio de hoje (bloqueio das 18:55 às 19:05). O sorteio acontece às 19:00h. Volte logo após a apuração!' 
+        },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const { amount, tickets, payerEmail, payerName, payerCpf, testMode } = body;
 

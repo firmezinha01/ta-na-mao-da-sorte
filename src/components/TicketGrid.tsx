@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
   Sparkles, 
@@ -12,10 +12,12 @@ import {
   ChevronRight, 
   ShoppingCart,
   Filter,
-  RefreshCw
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 import { Bilhete } from '@/types';
 import { sounds } from '@/lib/sound';
+import { isSalesCutoffActive } from '@/lib/drawTime';
 
 interface TicketGridProps {
   soldTickets: Bilhete[];
@@ -38,6 +40,16 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
   onClearSelection,
   onCheckout
 }) => {
+  // Estado de bloqueio das vendas (18:55 às 19:05)
+  const [isCutoff, setIsCutoff] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsCutoff(isSalesCutoffActive());
+    check();
+    const interval = setInterval(check, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Estado de busca e navegação
   const [searchTerm, setSearchTerm] = useState('');
   const [groupIndex, setGroupIndex] = useState(0); // 0 a 9 (grupos de 1.000: 0000-0999, 1000-1999, etc.)
@@ -206,6 +218,17 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Aviso de Vendas Encerradas das 18:55 às 19:05 */}
+      {isCutoff && (
+        <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3.5 sm:p-4 mb-4 flex items-center gap-3 text-amber-300 text-xs sm:text-sm animate-pulse">
+          <Clock className="w-5 h-5 shrink-0 text-amber-400" />
+          <div>
+            <strong className="block text-white font-bold">Vendas encerradas para o sorteio de hoje (às 18:55h)</strong>
+            <span>O sorteio oficial acontece às 19:00h! A nova rodada de vendas abrirá logo após a apuração.</span>
+          </div>
+        </div>
+      )}
 
       {/* Barra de Filtros e Busca */}
       <div className="bg-slate-900/70 border border-emerald-900/40 rounded-2xl p-3 sm:p-4 mb-4 sm:mb-5 backdrop-blur-sm">
@@ -470,12 +493,23 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
 
               <button
                 onClick={onCheckout}
-                className="flex items-center gap-1.5 px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-black text-xs sm:text-base bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-lg shadow-emerald-500/30 transition-all transform active:scale-95"
+                disabled={isCutoff}
+                className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-black text-xs sm:text-base transition-all transform active:scale-95 ${
+                  isCutoff
+                    ? 'bg-amber-600/70 text-amber-100 cursor-not-allowed opacity-90 shadow-none'
+                    : 'bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-lg shadow-emerald-500/30'
+                }`}
               >
-                <span>Pagar Pix:</span>
-                <span className="font-extrabold">
-                  {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                </span>
+                {isCutoff ? (
+                  <span>Vendas Encerradas às 18:55 (Sorteio 19h)</span>
+                ) : (
+                  <>
+                    <span>Pagar Pix:</span>
+                    <span className="font-extrabold">
+                      {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  </>
+                )}
               </button>
             </div>
 

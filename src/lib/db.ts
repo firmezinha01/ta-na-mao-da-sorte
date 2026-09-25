@@ -170,28 +170,48 @@ export class DatabaseService {
     // 3. Se o Supabase estiver configurado com credenciais válidas, sincroniza na nuvem
     if (isSupabaseConfigured && supabase) {
       try {
-        // Upsert do usuário
-        await supabase.from('usuarios').upsert({
-          id: user.id,
-          nome_completo: user.nome_completo,
-          cpf: user.cpf,
-          whatsapp: user.whatsapp,
-          data_cadastro: user.data_cadastro
-        }, { onConflict: 'cpf' });
+        let supabaseUserId = user.id;
 
-        // Insert dos bilhetes
-        const supabaseTickets = newTickets.map(t => ({
-          id: t.id,
-          numero_milhar: t.numero_milhar,
-          usuario_id: user!.id,
-          sorteio_id: t.sorteio_id,
-          data_compra: t.data_compra,
-          status_pagamento: t.status_pagamento,
-          payment_id: t.payment_id,
-          valor: t.valor
-        }));
+        // Localiza se o usuário já existe na nuvem pelo CPF
+        const { data: existingUser } = await supabase
+          .from('usuarios')
+          .select('id')
+          .eq('cpf', cleanCpf)
+          .maybeSingle();
 
-        await supabase.from('bilhetes').insert(supabaseTickets);
+        if (existingUser && existingUser.id) {
+          supabaseUserId = existingUser.id;
+          await supabase
+            .from('usuarios')
+            .update({
+              nome_completo: user.nome_completo,
+              whatsapp: user.whatsapp
+            })
+            .eq('id', supabaseUserId);
+        } else {
+          await supabase.from('usuarios').insert({
+            id: supabaseUserId,
+            nome_completo: user.nome_completo,
+            cpf: user.cpf,
+            whatsapp: user.whatsapp,
+            data_cadastro: user.data_cadastro
+          });
+        }
+
+        // Insere os bilhetes comprados vinculando ao usuário
+        if (newTickets.length > 0) {
+          const supabaseTickets = newTickets.map(t => ({
+            id: t.id,
+            numero_milhar: t.numero_milhar,
+            usuario_id: supabaseUserId,
+            sorteio_id: t.sorteio_id,
+            data_compra: t.data_compra,
+            status_pagamento: t.status_pagamento,
+            valor: t.valor
+          }));
+
+          await supabase.from('bilhetes').insert(supabaseTickets);
+        }
       } catch (err) {
         console.warn('Erro ao sincronizar com Supabase:', err);
       }

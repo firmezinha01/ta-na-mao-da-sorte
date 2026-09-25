@@ -182,7 +182,9 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     setWhatsapp(v);
   };
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const [isSavingParticipant, setIsSavingParticipant] = useState(false);
+
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nomeCompleto.trim() || nomeCompleto.trim().split(' ').length < 2) {
       setFormError('Por favor, informe seu nome completo com sobrenome.');
@@ -202,19 +204,30 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     }
 
     setFormError('');
+    setIsSavingParticipant(true);
 
-    // Salva o participante e os bilhetes no banco de dados (Supabase / Server DB)
-    fetch('/api/participants', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nome_completo: nomeCompleto.trim(),
-        cpf: cleanCpf,
-        whatsapp: cleanPhone,
-        tickets: selectedNumbers,
-        paymentId: pixData?.paymentId
-      })
-    }).catch(err => console.warn('Erro ao salvar participante no DB:', err));
+    try {
+      // Salva o participante e os bilhetes no banco de dados (Supabase / Server DB)
+      const res = await fetch('/api/participants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome_completo: nomeCompleto.trim(),
+          cpf: cleanCpf,
+          whatsapp: cleanPhone,
+          tickets: selectedNumbers,
+          paymentId: pixData?.paymentId
+        })
+      });
+
+      if (!res.ok) {
+        console.warn('Status da gravação de participante:', res.status);
+      }
+    } catch (err) {
+      console.warn('Erro ao salvar participante no DB:', err);
+    } finally {
+      setIsSavingParticipant(false);
+    }
 
     onPaymentComplete({
       nome_completo: nomeCompleto.trim(),
@@ -462,9 +475,17 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
 
               <button
                 type="submit"
-                className="w-full mt-5 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/25 transition-all transform active:scale-95"
+                disabled={isSavingParticipant}
+                className="w-full mt-5 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/25 transition-all transform active:scale-95 disabled:opacity-75 flex items-center justify-center gap-2"
               >
-                Confirmar Participação no Sorteio de Hoje
+                {isSavingParticipant ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                    <span>Salvando dados e confirmando...</span>
+                  </>
+                ) : (
+                  <span>Confirmar Participação no sorteio de hoje</span>
+                )}
               </button>
             </form>
           )}

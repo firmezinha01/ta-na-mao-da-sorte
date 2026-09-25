@@ -46,7 +46,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             <Ticket className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
               <strong className="text-white text-sm block">1. Compra de Milhares por R$ 2,00</strong>
-              O sistema gera automaticamente 10.000 combinações únicas sem repetição (de <strong>0000 a 9999</strong>). Cada participante pode escolher e comprar quantos bilhetes desejar por apenas R$ 2,00 cada.
+              O sistema gera automaticamente as combinações únicas sem repetição, cada participante pode escolher e comprar quantos bilhetes desejar por apenas R$ 2,00 cada.
             </div>
           </div>
 

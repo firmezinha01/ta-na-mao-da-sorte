@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Header } from '@/components/Header';
 import { BottomNav } from '@/components/BottomNav';
 import { JackpotBanner } from '@/components/JackpotBanner';
@@ -18,12 +18,17 @@ import {
 } from 'lucide-react';
 
 export default function Home() {
-  // Estados da aplicação inicializados com o AppStore
+  // Estados da aplicação sincronizados com o Servidor / Supabase
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [bilhetes, setBilhetes] = useState<Bilhete[]>([]);
   const [sorteio, setSorteio] = useState<Sorteio | null>(null);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [testMode, setTestMode] = useState<boolean>(false);
+
+  // Estados de Sincronização Temporal do Servidor (Zero Descompasso)
+  const [serverTimeOffset, setServerTimeOffset] = useState<number>(0);
+  const [targetTimestamp, setTargetTimestamp] = useState<number>(0);
+  const [targetLabel, setTargetLabel] = useState<string>('19:00h');
 
   // Seleção de bilhetes
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
@@ -35,22 +40,71 @@ export default function Home() {
   const [isMyTicketsOpen, setIsMyTicketsOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
 
-  // Carrega os dados na montagem do componente
-  const loadData = useCallback(() => {
-    setUsuarios(AppStore.getUsuarios());
-    setBilhetes(AppStore.getBilhetes());
-    setSorteio(AppStore.getSorteio());
-    setCurrentUser(AppStore.getCurrentUser());
-    setTestMode(AppStore.isTestMode());
+  const isInitialLoad = useRef(true);
+
+  // Carrega e sincroniza dados em tempo real com a API central
+  const loadData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/draw');
+      if (res.ok) {
+        const data = await res.json();
+        const clientNow = Date.now();
+        if (data.serverTime) {
+          setServerTimeOffset(data.serverTime - clientNow);
+        }
+        if (data.draw) {
+          setSorteio(data.draw);
+        }
+        if (data.tickets) {
+          setBilhetes(data.tickets);
+        }
+        if (data.schedule) {
+          setTargetTimestamp(data.schedule.targetTimestamp);
+          setTargetLabel(data.schedule.label);
+        }
+      }
+
+      // Atualiza lista de participantes da API
+      const resPart = await fetch('/api/participants');
+      if (resPart.ok) {
+        const partData = await resPart.json();
+        if (partData.participants) {
+          setUsuarios(partData.participants);
+        }
+      }
+
+      // Usuário salvo localmente no dispositivo
+      const localUser = AppStore.getCurrentUser();
+      if (localUser) {
+        setCurrentUser(localUser);
+      }
+      setTestMode(AppStore.isTestMode());
+    } catch (err) {
+      console.warn('Erro ao carregar dados centralizados:', err);
+      // Fallback para storage local se offline
+      if (isInitialLoad.current) {
+        setUsuarios(AppStore.getUsuarios());
+        setBilhetes(AppStore.getBilhetes());
+        setSorteio(AppStore.getSorteio());
+        setCurrentUser(AppStore.getCurrentUser());
+      }
+    } finally {
+      isInitialLoad.current = false;
+    }
   }, []);
 
+  // Montagem e polling leve a cada 4 segundos para manter todos os dispositivos 100% sincronizados
   useEffect(() => {
     loadData();
+    const interval = setInterval(() => {
+      loadData();
+    }, 4000);
+    return () => clearInterval(interval);
   }, [loadData]);
 
   // Bilhetes pertencentes ao usuário logado ou da sessão
   const myTickets = currentUser 
-    ? bilhetes.filter(b => b.usuario_id === currentUser.id)
+    ? bilhetes.filter(b => b.usuario_id === currentUser.id || (currentUser.cpf && b.usuario?.cpf === currentUser.cpf))
     : [];
 
   // Alterna a seleção de um número
@@ -85,16 +139,52 @@ export default function Home() {
     setSelectedNumbers([]);
   };
 
-  // Executa o sorteio das 19h
+  // Executa o sorteio centralizado no Servidor (100% IDÊNTICO PARA TODOS)
   const handleExecuteDraw = async (options?: { forcedWinnerMilhar?: string; isSunday?: boolean }) => {
-    const result = await AppStore.executeDraw(options);
+    try {
+      const res = await fetch('/api/draw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          drawId: sorteio?.id,
+          forcedWinnerMilhar: options?.forcedWinnerMilhar
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setSorteio(data.sorteio);
+          loadData();
+          return {
+            sorteio: data.sorteio,
+            milhar: data.milhar,
+            ganhador: data.ganhador,
+            mensagensGeradas: data.mensagensGeradas || []
+          };
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao executar sorteio no servidor:', err);
+    }
+
+    // Fallback de emergência caso a rede caia
+    const localResult = await AppStore.executeDraw(options);
     loadData();
-    return result;
+    return localResult;
   };
 
   // Inicia um novo ciclo de sorteio
-  const handleStartNewCycle = () => {
-    AppStore.startNewDrawCycle();
+  const handleStartNewCycle = async () => {
+    try {
+      await fetch('/api/draw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'new_cycle' })
+      });
+    } catch (e) {
+      AppStore.startNewDrawCycle();
+    }
     loadData();
   };
 
@@ -121,7 +211,10 @@ export default function Home() {
       <Header
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         onOpenRules={() => setIsRulesOpen(true)}
-        onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
+        onOpenLiveDraw={() => {
+          setIsAutoDrawStart(false);
+          setIsLiveDrawOpen(true);
+        }}
         myTicketsCount={myTickets.length}
         currentUser={currentUser}
       />
@@ -129,9 +222,12 @@ export default function Home() {
       {/* Conteúdo Principal */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-8">
         
-        {/* Banner do Prêmio & Contador Regressivo para as 19h */}
+        {/* Banner do Prêmio & Contador Regressivo Sincronizado */}
         <JackpotBanner
           sorteio={sorteio}
+          serverTimeOffset={serverTimeOffset}
+          targetTimestamp={targetTimestamp}
+          targetLabelDisplay={targetLabel}
           onScrollToGrid={handleScrollToGrid}
           onOpenLiveDraw={() => {
             setIsAutoDrawStart(false);
@@ -203,7 +299,13 @@ export default function Home() {
             <button onClick={handleScrollToGrid} className="hover:text-emerald-400 transition-colors">
               Milhares
             </button>
-            <button onClick={() => setIsLiveDrawOpen(true)} className="hover:text-amber-400 transition-colors font-bold">
+            <button 
+              onClick={() => {
+                setIsAutoDrawStart(false);
+                setIsLiveDrawOpen(true);
+              }} 
+              className="hover:text-amber-400 transition-colors font-bold"
+            >
               SORTEIO 19H
             </button>
             <button onClick={() => setIsMyTicketsOpen(true)} className="hover:text-cyan-400 transition-colors">
@@ -220,7 +322,10 @@ export default function Home() {
       {/* BARRA DE NAVEGAÇÃO INFERIOR PARA CELULARES (BOTTOM NAV) */}
       <BottomNav
         onScrollToGrid={handleScrollToGrid}
-        onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
+        onOpenLiveDraw={() => {
+          setIsAutoDrawStart(false);
+          setIsLiveDrawOpen(true);
+        }}
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         myTicketsCount={myTickets.length}
       />
@@ -235,12 +340,13 @@ export default function Home() {
         onPaymentComplete={handlePaymentComplete}
       />
 
-      {/* MODAL 2: Arena do Sorteio das 19h ao Vivo */}
+      {/* MODAL 2: Arena do Sorteio das 19h ao Vivo (Centralizado e Simultâneo) */}
       <DrawLiveArena
         isOpen={isLiveDrawOpen}
         onClose={() => {
           setIsLiveDrawOpen(false);
           setIsAutoDrawStart(false);
+          loadData();
         }}
         sorteio={sorteio}
         soldTickets={bilhetes}

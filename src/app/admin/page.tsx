@@ -80,9 +80,16 @@ export default function AdminPage() {
         setParticipants(data.participants || []);
       }
 
-      // 2. Bilhetes, Sorteio e Mensagens locais/storage
-      setTickets(AppStore.getBilhetes());
-      setSorteio(AppStore.getSorteio());
+      // 2. Bilhetes e Sorteio da API Central
+      const resDraw = await fetch('/api/draw');
+      if (resDraw.ok) {
+        const drawData = await resDraw.json();
+        if (drawData.draw) setSorteio(drawData.draw);
+        if (drawData.tickets) setTickets(drawData.tickets);
+      } else {
+        setTickets(AppStore.getBilhetes());
+        setSorteio(AppStore.getSorteio());
+      }
       setMessages(AppStore.getMensagens());
     } catch (err) {
       console.error('Erro ao carregar dados do admin:', err);
@@ -142,25 +149,51 @@ export default function AdminPage() {
     }
   };
 
-  // Executar Sorteio pelo Admin
+  // Executar Sorteio pelo Admin (Centralizado na Nuvem)
   const handleRunDraw = async (options?: { forcedWinnerMilhar?: string; isSunday?: boolean }) => {
+    try {
+      const res = await fetch('/api/draw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          drawId: sorteio?.id,
+          forcedWinnerMilhar: options?.forcedWinnerMilhar
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSorteio(data.sorteio);
+        await loadDashboardData();
+
+        if (data.ganhador) {
+          sounds.playWinFanfare();
+          confetti({ particleCount: 150, spread: 80 });
+        } else {
+          sounds.playAccumulatedBell();
+        }
+        return;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
     const result = await AppStore.executeDraw(options);
     setSorteio(result.sorteio);
     await loadDashboardData();
-
-    if (result.ganhador) {
-      sounds.playWinFanfare();
-      confetti({ particleCount: 150, spread: 80 });
-    } else {
-      sounds.playAccumulatedBell();
-    }
   };
 
-  // Preparar Novo Sorteio
-  const handleStartNewCycle = () => {
-    AppStore.startNewDrawCycle();
-    setSorteio(AppStore.getSorteio());
-    loadDashboardData();
+  // Preparar Novo Sorteio (Centralizado na Nuvem)
+  const handleStartNewCycle = async () => {
+    try {
+      await fetch('/api/draw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'new_cycle' })
+      });
+    } catch (e) {
+      AppStore.startNewDrawCycle();
+    }
+    await loadDashboardData();
   };
 
   // ==========================================

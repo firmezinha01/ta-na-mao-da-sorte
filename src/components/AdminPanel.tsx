@@ -32,6 +32,7 @@ interface AdminPanelProps {
   onGenerateQuickSales: (count: number) => void;
   onResetData: () => void;
   onAdjustPrize: (newPrize: number) => void;
+  onLogout: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -44,7 +45,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onToggleTestMode,
   onGenerateQuickSales,
   onResetData,
-  onAdjustPrize
+  onAdjustPrize,
+  onLogout
 }) => {
   const [customPrize, setCustomPrize] = useState(sorteio.premio.toString());
   const [successMsg, setSuccessMsg] = useState('');
@@ -249,7 +251,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950/70 text-right">
+        <div className="p-4 border-t border-slate-800 bg-slate-950/70 flex items-center justify-between">
+          <button
+            onClick={onLogout}
+            className="px-4 py-2 rounded-xl bg-red-950/60 hover:bg-red-900/60 text-red-300 font-bold text-xs border border-red-800 transition-colors flex items-center gap-1.5"
+            title="Bloquear painel com Senha Master"
+          >
+            <span>🔒 Bloquear Painel</span>
+          </button>
           <button
             onClick={onClose}
             className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs"

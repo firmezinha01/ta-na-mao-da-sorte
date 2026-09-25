@@ -10,7 +10,9 @@ import {
   ExternalLink, 
   ShieldCheck, 
   Flame,
-  User
+  User,
+  MessageSquare,
+  Lock
 } from 'lucide-react';
 import { Usuario } from '@/types';
 
@@ -19,9 +21,11 @@ interface MobileMenuModalProps {
   onClose: () => void;
   onOpenRules: () => void;
   onOpenAdmin: () => void;
+  onOpenWhatsAppHub: () => void;
   testMode: boolean;
   onToggleTestMode: () => void;
   currentUser: Usuario | null;
+  isAdminAuthenticated?: boolean;
 }
 
 export const MobileMenuModal: React.FC<MobileMenuModalProps> = ({
@@ -29,14 +33,16 @@ export const MobileMenuModal: React.FC<MobileMenuModalProps> = ({
   onClose,
   onOpenRules,
   onOpenAdmin,
+  onOpenWhatsAppHub,
   testMode,
   onToggleTestMode,
-  currentUser
+  currentUser,
+  isAdminAuthenticated = false
 }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="w-full sm:max-w-md bg-slate-900 border border-emerald-900/60 rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom duration-200">
         
         {/* Header */}
@@ -69,34 +75,7 @@ export const MobileMenuModal: React.FC<MobileMenuModalProps> = ({
         {/* Lista de Ações */}
         <div className="space-y-2.5 my-4">
           
-          {/* Alternar Modo de Teste */}
-          <button
-            onClick={() => {
-              onToggleTestMode();
-            }}
-            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-left transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              {testMode ? (
-                <AlertTriangle className="w-5 h-5 text-amber-400" />
-              ) : (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-              )}
-              <div>
-                <span className="text-xs font-bold text-white block">
-                  {testMode ? 'Modo de Teste (Ativo)' : 'Modo de Produção (Ativo)'}
-                </span>
-                <span className="text-[10px] text-slate-400">
-                  {testMode ? 'Transações Pix simuladas sem gastar dinheiro' : 'Chaves oficiais Mercado Pago ativas'}
-                </span>
-              </div>
-            </div>
-            <span className={`px-2 py-0.5 rounded text-[10px] font-black ${testMode ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
-              Alternar
-            </span>
-          </button>
-
-          {/* Regras e Como Funciona */}
+          {/* Regras e Como Funciona (Aberto para todos) */}
           <button
             onClick={() => {
               onClose();
@@ -104,27 +83,91 @@ export const MobileMenuModal: React.FC<MobileMenuModalProps> = ({
             }}
             className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-left transition-colors"
           >
-            <HelpCircle className="w-5 h-5 text-amber-400" />
+            <HelpCircle className="w-5 h-5 text-amber-400 shrink-0" />
             <div>
               <span className="text-xs font-bold text-white block">Como Funciona / Regulamento</span>
               <span className="text-[10px] text-slate-400">Regras do sorteio diário às 19h e prêmio acumulado</span>
             </div>
           </button>
 
-          {/* Painel de Administração */}
+          {/* Central de WhatsApp (Requer Senha Master) */}
+          <button
+            onClick={() => {
+              onClose();
+              onOpenWhatsAppHub();
+            }}
+            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-left transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <MessageSquare className="w-5 h-5 text-green-400 shrink-0" />
+              <div>
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>Central de WhatsApp</span>
+                  {!isAdminAuthenticated && <Lock className="w-3 h-3 text-amber-400" />}
+                </span>
+                <span className="text-[10px] text-slate-400">Histórico de disparos de lembretes e resultados</span>
+              </div>
+            </div>
+            {!isAdminAuthenticated && (
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Restrito
+              </span>
+            )}
+          </button>
+
+          {/* Painel de Administração (Requer Senha Master) */}
           <button
             onClick={() => {
               onClose();
               onOpenAdmin();
             }}
-            className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-left transition-colors"
+            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-left transition-colors"
           >
-            <Settings className="w-5 h-5 text-cyan-400" />
-            <div>
-              <span className="text-xs font-bold text-white block">Painel Administrativo</span>
-              <span className="text-[10px] text-slate-400">Métricas, faturamento, simulações de teste e reset</span>
+            <div className="flex items-center gap-3">
+              <Settings className="w-5 h-5 text-cyan-400 shrink-0" />
+              <div>
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>Painel Administrativo</span>
+                  {!isAdminAuthenticated && <Lock className="w-3 h-3 text-amber-400" />}
+                </span>
+                <span className="text-[10px] text-slate-400">Métricas, faturamento, simulações de teste e reset</span>
+              </div>
             </div>
+            {!isAdminAuthenticated && (
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Restrito
+              </span>
+            )}
           </button>
+
+          {/* Alternar Modo de Teste (Visível apenas após autenticar ou para controle) */}
+          {isAdminAuthenticated && (
+            <button
+              onClick={() => {
+                onToggleTestMode();
+              }}
+              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-left transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                {testMode ? (
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                )}
+                <div>
+                  <span className="text-xs font-bold text-white block">
+                    {testMode ? 'Modo de Teste (Ativo)' : 'Modo de Produção (Ativo)'}
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    {testMode ? 'Transações Pix simuladas sem gastar dinheiro' : 'Chaves oficiais Mercado Pago ativas'}
+                  </span>
+                </div>
+              </div>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-black ${testMode ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                Alternar
+              </span>
+            </button>
+          )}
 
         </div>
 

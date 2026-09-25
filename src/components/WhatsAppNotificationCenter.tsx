@@ -23,6 +23,7 @@ interface WhatsAppNotificationCenterProps {
   mensagens: Mensagem[];
   onTriggerDailyReminder: () => Promise<void>;
   registeredUsersCount: number;
+  onLogout: () => void;
 }
 
 export const WhatsAppNotificationCenter: React.FC<WhatsAppNotificationCenterProps> = ({
@@ -30,7 +31,8 @@ export const WhatsAppNotificationCenter: React.FC<WhatsAppNotificationCenterProp
   onClose,
   mensagens,
   onTriggerDailyReminder,
-  registeredUsersCount
+  registeredUsersCount,
+  onLogout
 }) => {
   const [filter, setFilter] = useState<'all' | TipoMensagem>('all');
   const [isSendingReminder, setIsSendingReminder] = useState(false);
@@ -223,7 +225,13 @@ export const WhatsAppNotificationCenter: React.FC<WhatsAppNotificationCenterProp
 
         {/* Rodapé Informativo */}
         <div className="p-4 border-t border-slate-800 bg-slate-950/70 text-xs text-slate-400 flex items-center justify-between">
-          <span>Integração: Twilio / Evolution API / WhatsApp Business</span>
+          <button
+            onClick={onLogout}
+            className="px-3.5 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/60 text-red-300 font-bold text-xs border border-red-800 transition-colors flex items-center gap-1.5"
+            title="Bloquear painel com Senha Master"
+          >
+            <span>🔒 Bloquear Painel</span>
+          </button>
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs"

@@ -8,7 +8,8 @@ import {
   Settings, 
   HelpCircle, 
   CheckCircle2, 
-  AlertTriangle 
+  AlertTriangle,
+  Lock
 } from 'lucide-react';
 import { Usuario } from '@/types';
 
@@ -23,6 +24,7 @@ interface HeaderProps {
   currentUser: Usuario | null;
   testMode: boolean;
   onToggleTestMode: () => void;
+  isAdminAuthenticated?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -35,7 +37,8 @@ export const Header: React.FC<HeaderProps> = ({
   unreadMessagesCount,
   currentUser,
   testMode,
-  onToggleTestMode
+  onToggleTestMode,
+  isAdminAuthenticated = false
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full bg-slate-950/95 backdrop-blur-md border-b border-emerald-900/40 text-white">
@@ -106,15 +109,22 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* WhatsApp Hub (Desktop) */}
+            {/* WhatsApp Hub (Desktop - Requer Senha Master) */}
             <button
               onClick={onOpenWhatsAppHub}
-              className="hidden sm:flex relative p-2 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-200 border border-emerald-700/50 transition-colors items-center gap-1.5"
-              title="Central de Mensagens do WhatsApp"
+              className={`hidden sm:flex relative p-2 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-colors items-center gap-1.5 ${
+                isAdminAuthenticated
+                  ? 'bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-200 border-emerald-700/50'
+                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800'
+              }`}
+              title={isAdminAuthenticated ? "Central de Mensagens do WhatsApp" : "Acesso Restrito: WhatsApp Hub (Requer Senha Master)"}
             >
               <MessageSquare className="w-4 h-4 text-green-400" />
               <span className="hidden lg:inline">WhatsApp</span>
-              {unreadMessagesCount > 0 && (
+              {!isAdminAuthenticated && (
+                <Lock className="w-3 h-3 text-amber-400" />
+              )}
+              {unreadMessagesCount > 0 && isAdminAuthenticated && (
                 <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-green-500 text-[9px] font-bold text-slate-950">
                   {unreadMessagesCount}
                 </span>
@@ -130,13 +140,20 @@ export const Header: React.FC<HeaderProps> = ({
               <HelpCircle className="w-4 h-4 text-amber-400" />
             </button>
 
-            {/* Admin (Desktop e Mobile) */}
+            {/* Admin (Desktop e Mobile - Requer Senha Master) */}
             <button
               onClick={onOpenAdmin}
-              className="p-2 sm:px-2.5 sm:py-2 rounded-xl text-xs font-semibold bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/50 transition-colors"
-              title="Painel de Administração e Testes"
+              className={`relative p-2 sm:px-2.5 sm:py-2 rounded-xl text-xs font-semibold border transition-colors flex items-center gap-1 ${
+                isAdminAuthenticated
+                  ? 'bg-amber-950/40 text-amber-300 border-amber-500/50'
+                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800'
+              }`}
+              title={isAdminAuthenticated ? "Painel de Administração" : "Acesso Restrito: Painel Admin (Requer Senha Master)"}
             >
-              <Settings className="w-4 h-4 text-slate-300" />
+              <Settings className="w-4 h-4" />
+              {!isAdminAuthenticated && (
+                <Lock className="w-2.5 h-2.5 text-amber-400 -ml-0.5" />
+              )}
             </button>
 
             {/* Usuário Logado */}

@@ -8,7 +8,8 @@ import {
   MessageSquare, 
   Menu,
   HelpCircle,
-  Settings
+  Settings,
+  Lock
 } from 'lucide-react';
 
 interface BottomNavProps {
@@ -19,6 +20,7 @@ interface BottomNavProps {
   onOpenMenu: () => void;
   myTicketsCount: number;
   unreadMessagesCount: number;
+  isAdminAuthenticated?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
@@ -28,7 +30,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onOpenWhatsAppHub,
   onOpenMenu,
   myTicketsCount,
-  unreadMessagesCount
+  unreadMessagesCount,
+  isAdminAuthenticated = false
 }) => {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-emerald-900/60 px-2 py-1.5 sm:hidden transition-all shadow-[0_-8px_20px_rgba(0,0,0,0.5)]">
@@ -70,14 +73,21 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           </span>
         </button>
 
-        {/* WhatsApp Hub */}
+        {/* WhatsApp Hub (Requer Senha Master) */}
         <button
           onClick={onOpenWhatsAppHub}
           className="relative flex flex-col items-center justify-center p-1.5 text-slate-400 hover:text-green-400 active:scale-95 transition-all"
         >
-          <MessageSquare className="w-5 h-5 text-green-400" />
+          <div className="relative">
+            <MessageSquare className="w-5 h-5 text-green-400" />
+            {!isAdminAuthenticated && (
+              <span className="absolute -bottom-1 -right-1.5 w-3.5 h-3.5 bg-slate-950 rounded-full flex items-center justify-center border border-amber-400">
+                <Lock className="w-2 h-2 text-amber-400" />
+              </span>
+            )}
+          </div>
           <span className="text-[10px] font-bold mt-0.5">WhatsApp</span>
-          {unreadMessagesCount > 0 && (
+          {unreadMessagesCount > 0 && isAdminAuthenticated && (
             <span className="absolute top-0 right-2 w-4 h-4 bg-green-500 text-slate-950 rounded-full text-[9px] font-black flex items-center justify-center">
               {unreadMessagesCount}
             </span>

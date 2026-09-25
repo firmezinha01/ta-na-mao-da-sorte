@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/Header';
 import { BottomNav } from '@/components/BottomNav';
 import { MobileMenuModal } from '@/components/MobileMenuModal';
+import { MasterPasswordModal } from '@/components/MasterPasswordModal';
 import { JackpotBanner } from '@/components/JackpotBanner';
 import { TicketGrid } from '@/components/TicketGrid';
 import { PixCheckoutModal } from '@/components/PixCheckoutModal';
@@ -17,7 +18,8 @@ import { Bilhete, Mensagem, Sorteio, Usuario } from '@/types';
 import { 
   ShieldCheck, 
   Trophy, 
-  Phone
+  Phone,
+  Lock
 } from 'lucide-react';
 
 export default function Home() {
@@ -27,7 +29,7 @@ export default function Home() {
   const [sorteio, setSorteio] = useState<Sorteio | null>(null);
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
-  const [testMode, setTestMode] = useState<boolean>(true);
+  const [testMode, setTestMode] = useState<boolean>(false);
 
   // Seleção de bilhetes
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
@@ -41,6 +43,11 @@ export default function Home() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Autenticação de Administrador (Senha Master para Admin e WhatsApp)
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
+  const [isMasterPasswordModalOpen, setIsMasterPasswordModalOpen] = useState<boolean>(false);
+  const [pendingRestrictedAction, setPendingRestrictedAction] = useState<'admin' | 'whatsapp' | null>(null);
+
   // Carrega os dados na montagem do componente
   const loadData = useCallback(() => {
     setUsuarios(AppStore.getUsuarios());
@@ -49,11 +56,62 @@ export default function Home() {
     setMensagens(AppStore.getMensagens());
     setCurrentUser(AppStore.getCurrentUser());
     setTestMode(AppStore.isTestMode());
+
+    if (typeof window !== 'undefined') {
+      const savedAuth = sessionStorage.getItem('tanamao_master_auth') === 'true';
+      if (savedAuth) setIsAdminAuthenticated(true);
+    }
   }, []);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Abertura protegida do Painel Admin
+  const handleOpenAdminProtected = () => {
+    if (isAdminAuthenticated) {
+      setIsAdminOpen(true);
+    } else {
+      setPendingRestrictedAction('admin');
+      setIsMasterPasswordModalOpen(true);
+    }
+  };
+
+  // Abertura protegida da Central do WhatsApp
+  const handleOpenWhatsAppProtected = () => {
+    if (isAdminAuthenticated) {
+      setIsWhatsAppHubOpen(true);
+    } else {
+      setPendingRestrictedAction('whatsapp');
+      setIsMasterPasswordModalOpen(true);
+    }
+  };
+
+  // Sucesso na digitação da Senha Master
+  const handleMasterAuthSuccess = () => {
+    setIsAdminAuthenticated(true);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('tanamao_master_auth', 'true');
+    }
+    setIsMasterPasswordModalOpen(false);
+
+    if (pendingRestrictedAction === 'admin') {
+      setIsAdminOpen(true);
+    } else if (pendingRestrictedAction === 'whatsapp') {
+      setIsWhatsAppHubOpen(true);
+    }
+    setPendingRestrictedAction(null);
+  };
+
+  // Bloquear e encerrar sessão de administrador
+  const handleMasterLogout = () => {
+    setIsAdminAuthenticated(false);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('tanamao_master_auth');
+    }
+    setIsAdminOpen(false);
+    setIsWhatsAppHubOpen(false);
+  };
 
   // Bilhetes pertencentes ao usuário logado ou da sessão
   const myTickets = currentUser 
@@ -185,8 +243,8 @@ export default function Home() {
       {/* Navegação Superior */}
       <Header
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
-        onOpenWhatsAppHub={() => setIsWhatsAppHubOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
+        onOpenWhatsAppHub={handleOpenWhatsAppProtected}
+        onOpenAdmin={handleOpenAdminProtected}
         onOpenRules={() => setIsRulesOpen(true)}
         onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
         myTicketsCount={myTickets.length}
@@ -194,6 +252,7 @@ export default function Home() {
         currentUser={currentUser}
         testMode={testMode}
         onToggleTestMode={handleToggleTestMode}
+        isAdminAuthenticated={isAdminAuthenticated}
       />
 
       {/* Conteúdo Principal */}
@@ -227,7 +286,7 @@ export default function Home() {
             </div>
             <h3 className="font-extrabold text-white text-sm sm:text-base mb-1">Pagamento Pix Mercado Pago</h3>
             <p className="text-[11px] sm:text-xs text-slate-400 leading-relaxed">
-              QR Code e código copia e cola gerados via Mercado Pago com confirmação instantânea dos seus bilhetes.
+              QR Code e chave copia e cola oficiais do Mercado Pago com confirmação e emissão automática dos bilhetes.
             </p>
           </div>
 
@@ -237,7 +296,7 @@ export default function Home() {
             </div>
             <h3 className="font-extrabold text-white text-sm sm:text-base mb-1">Sorteio Diário às 19:00h</h3>
             <p className="text-[11px] sm:text-xs text-slate-400 leading-relaxed">
-              Prêmio garantido de R$ 500 ou acumulado até domingo, quando a roleta gira sucessivamente até premiar um bilhete!
+              Prêmio fixo de R$ 500 ou acumulado até domingo, quando a roleta gira sucessivamente até sair um bilhete premiado!
             </p>
           </div>
 
@@ -245,7 +304,7 @@ export default function Home() {
             <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-green-500/20 text-green-400 flex items-center justify-center mb-3 sm:mb-4">
               <Phone className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <h3 className="font-extrabold text-white text-sm sm:text-base mb-1">Notificações no seu WhatsApp</h3>
+            <h3 className="font-extrabold text-white text-sm sm:text-base mb-1">Notificações no WhatsApp</h3>
             <p className="text-[11px] sm:text-xs text-slate-400 leading-relaxed">
               Lembretes antes das 19h, resultado do sorteio com nome e final do celular, e mensagem exclusiva ao vencedor.
             </p>
@@ -268,11 +327,13 @@ export default function Home() {
             <button onClick={() => setIsRulesOpen(true)} className="hover:text-emerald-400 transition-colors">
               Regulamento
             </button>
-            <button onClick={() => setIsWhatsAppHubOpen(true)} className="hover:text-green-400 transition-colors">
-              WhatsApp
+            <button onClick={handleOpenWhatsAppProtected} className="hover:text-green-400 transition-colors flex items-center gap-1">
+              <span>WhatsApp</span>
+              {!isAdminAuthenticated && <Lock className="w-3 h-3 text-amber-400" />}
             </button>
-            <button onClick={() => setIsAdminOpen(true)} className="hover:text-amber-400 transition-colors">
-              Painel Admin
+            <button onClick={handleOpenAdminProtected} className="hover:text-amber-400 transition-colors flex items-center gap-1">
+              <span>Painel Admin</span>
+              {!isAdminAuthenticated && <Lock className="w-3 h-3 text-amber-400" />}
             </button>
           </div>
 
@@ -287,10 +348,11 @@ export default function Home() {
         onScrollToGrid={handleScrollToGrid}
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
-        onOpenWhatsAppHub={() => setIsWhatsAppHubOpen(true)}
+        onOpenWhatsAppHub={handleOpenWhatsAppProtected}
         onOpenMenu={() => setIsMobileMenuOpen(true)}
         myTicketsCount={myTickets.length}
         unreadMessagesCount={mensagens.length}
+        isAdminAuthenticated={isAdminAuthenticated}
       />
 
       {/* MODAL MENU MOBILE (Mais Opções) */}
@@ -298,13 +360,26 @@ export default function Home() {
         isOpen={isMobileMenuOpen}
         onClose={() => setIsMobileMenuOpen(false)}
         onOpenRules={() => setIsRulesOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
+        onOpenAdmin={handleOpenAdminProtected}
+        onOpenWhatsAppHub={handleOpenWhatsAppProtected}
         testMode={testMode}
         onToggleTestMode={handleToggleTestMode}
         currentUser={currentUser}
+        isAdminAuthenticated={isAdminAuthenticated}
       />
 
-      {/* MODAL 1: Checkout Pix (Mercado Pago + Modo de Teste) */}
+      {/* MODAL DE SENHA MASTER (Proteção contra acesso não autorizado) */}
+      <MasterPasswordModal
+        isOpen={isMasterPasswordModalOpen}
+        onClose={() => {
+          setIsMasterPasswordModalOpen(false);
+          setPendingRestrictedAction(null);
+        }}
+        onSuccess={handleMasterAuthSuccess}
+        targetTitle={pendingRestrictedAction === 'admin' ? 'Painel Administrativo' : 'Central do WhatsApp'}
+      />
+
+      {/* MODAL 1: Checkout Pix (Mercado Pago Oficial) */}
       <PixCheckoutModal
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
@@ -334,13 +409,14 @@ export default function Home() {
         currentSorteio={sorteio}
       />
 
-      {/* MODAL 4: Central de Notificações do WhatsApp */}
+      {/* MODAL 4: Central de Notificações do WhatsApp (Protegido por Senha Master) */}
       <WhatsAppNotificationCenter
         isOpen={isWhatsAppHubOpen}
         onClose={() => setIsWhatsAppHubOpen(false)}
         mensagens={mensagens}
         onTriggerDailyReminder={handleTriggerDailyReminder}
         registeredUsersCount={usuarios.length}
+        onLogout={handleMasterLogout}
       />
 
       {/* MODAL 5: Regras e Como Funciona */}
@@ -349,7 +425,7 @@ export default function Home() {
         onClose={() => setIsRulesOpen(false)}
       />
 
-      {/* MODAL 6: Painel de Controle / Administração */}
+      {/* MODAL 6: Painel de Controle / Administração (Protegido por Senha Master) */}
       <AdminPanel
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
@@ -361,6 +437,7 @@ export default function Home() {
         onGenerateQuickSales={handleGenerateQuickSales}
         onResetData={handleResetData}
         onAdjustPrize={handleAdjustPrize}
+        onLogout={handleMasterLogout}
       />
 
     </div>

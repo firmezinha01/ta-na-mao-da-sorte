@@ -6,7 +6,7 @@ import { Sorteio } from '@/types';
 
 interface JackpotBannerProps {
   sorteio: Sorteio;
-  soldCount: number;
+  soldCount?: number;
   totalCombinations?: number;
   onScrollToGrid: () => void;
   onOpenLiveDraw: () => void;
@@ -14,8 +14,6 @@ interface JackpotBannerProps {
 
 export const JackpotBanner: React.FC<JackpotBannerProps> = ({
   sorteio,
-  soldCount,
-  totalCombinations = 10000,
   onScrollToGrid,
   onOpenLiveDraw
 }) => {
@@ -151,23 +149,19 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
           </button>
         </div>
 
-        {/* Indicadores de Status */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 w-full max-w-3xl mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-emerald-900/40 text-[11px] sm:text-xs text-slate-300">
-          <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950">
-            <p className="text-slate-400">Total Milhares</p>
-            <p className="text-xs sm:text-base font-bold text-white">10.000</p>
+        {/* Indicadores de Destaque para o Jogador */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 w-full max-w-2xl mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-emerald-900/40 text-[11px] sm:text-xs text-slate-300">
+          <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950 text-center">
+            <p className="text-slate-400">Preço da Milhar</p>
+            <p className="text-xs sm:text-base font-bold text-amber-400">Apenas R$ 2,00</p>
           </div>
-          <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950">
-            <p className="text-slate-400">Compradas</p>
-            <p className="text-xs sm:text-base font-bold text-emerald-400">{soldCount}</p>
+          <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950 text-center">
+            <p className="text-slate-400">Pagamento Pix</p>
+            <p className="text-xs sm:text-base font-bold text-cyan-400">Mercado Pago Oficial</p>
           </div>
-          <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950">
-            <p className="text-slate-400">Preço</p>
-            <p className="text-xs sm:text-base font-bold text-amber-400">R$ 2,00</p>
-          </div>
-          <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950">
-            <p className="text-slate-400">Pagamento</p>
-            <p className="text-xs sm:text-base font-bold text-cyan-400">Pix Mercado Pago</p>
+          <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950 text-center">
+            <p className="text-slate-400">Sorteio Oficial</p>
+            <p className="text-xs sm:text-base font-bold text-emerald-400">Diário às 19:00h</p>
           </div>
         </div>
 

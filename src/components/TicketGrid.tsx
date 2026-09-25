@@ -275,7 +275,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
                   : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
               }`}
             >
-              Vendidos ({soldTickets.length})
+              Vendidos
             </button>
           </div>
 

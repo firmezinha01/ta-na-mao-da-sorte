@@ -131,8 +131,6 @@ export default function Home() {
         {/* Banner do Prêmio & Contador Regressivo para as 19h */}
         <JackpotBanner
           sorteio={sorteio}
-          soldCount={bilhetes.length}
-          totalCombinations={10000}
           onScrollToGrid={handleScrollToGrid}
           onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
         />
@@ -194,14 +192,14 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-4 text-[11px] sm:text-xs">
-            <button onClick={() => setIsRulesOpen(true)} className="hover:text-emerald-400 transition-colors">
-              Regulamento
+            <button onClick={handleScrollToGrid} className="hover:text-emerald-400 transition-colors">
+              Milhares
+            </button>
+            <button onClick={() => setIsLiveDrawOpen(true)} className="hover:text-amber-400 transition-colors font-bold">
+              SORTEIO 19H
             </button>
             <button onClick={() => setIsMyTicketsOpen(true)} className="hover:text-cyan-400 transition-colors">
               Meus Bilhetes
-            </button>
-            <button onClick={() => setIsLiveDrawOpen(true)} className="hover:text-amber-400 transition-colors">
-              Sorteio das 19h
             </button>
           </div>
 
@@ -214,9 +212,8 @@ export default function Home() {
       {/* BARRA DE NAVEGAÇÃO INFERIOR PARA CELULARES (BOTTOM NAV) */}
       <BottomNav
         onScrollToGrid={handleScrollToGrid}
-        onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
-        onOpenRules={() => setIsRulesOpen(true)}
+        onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         myTicketsCount={myTickets.length}
       />
 

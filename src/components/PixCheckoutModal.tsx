@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Copy, 
@@ -11,7 +11,10 @@ import {
   Clock, 
   PartyPopper,
   Phone,
-  AlertCircle
+  AlertCircle,
+  Smartphone,
+  CheckCircle2,
+  RefreshCw
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { PixPaymentData, Usuario } from '@/types';
@@ -39,18 +42,23 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   const [loadingPix, setLoadingPix] = useState(true);
   const [copied, setCopied] = useState(false);
   const [isProcessingApproval, setIsProcessingApproval] = useState(false);
+  const [isCheckingAuto, setIsCheckingAuto] = useState(false);
 
   const [nomeCompleto, setNomeCompleto] = useState('');
   const [cpf, setCpf] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [formError, setFormError] = useState('');
 
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Inicializa e gera o Pix ao abrir o modal
   useEffect(() => {
     if (!isOpen || selectedNumbers.length === 0) return;
 
     setStep('payment');
     setFormError('');
     setCopied(false);
+    setIsCheckingAuto(false);
 
     if (currentUser) {
       setNomeCompleto(currentUser.nome_completo || '');
@@ -67,6 +75,8 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
           body: JSON.stringify({
             tickets: selectedNumbers,
             amount: selectedNumbers.length * 2.00,
+            payerName: currentUser?.nome_completo,
+            payerCpf: currentUser?.cpf,
             testMode
           })
         });
@@ -83,25 +93,67 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     };
 
     fetchPix();
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
   }, [isOpen, selectedNumbers, currentUser, testMode]);
+
+  // Polling automático para verificar se o Pix foi pago no banco
+  useEffect(() => {
+    if (step !== 'payment' || !pixData?.paymentId) return;
+
+    const checkStatus = async () => {
+      try {
+        setIsCheckingAuto(true);
+        const res = await fetch(`/api/pix/status?paymentId=${pixData.paymentId}`);
+        if (res.ok) {
+          const result = await res.json();
+          if (result.status === 'approved') {
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            sounds.playWinFanfare();
+            confetti({
+              particleCount: 120,
+              spread: 80,
+              origin: { y: 0.6 }
+            });
+            setStep('registration');
+          }
+        }
+      } catch (err) {
+        console.warn('Verificação de status Pix:', err);
+      } finally {
+        setIsCheckingAuto(false);
+      }
+    };
+
+    pollingRef.current = setInterval(checkStatus, 3500);
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [step, pixData]);
 
   if (!isOpen) return null;
 
   const totalAmount = selectedNumbers.length * 2.00;
 
+  // Copia a Chave Pix Copia e Cola
   const handleCopyPix = () => {
     if (!pixData?.copyPaste) return;
     navigator.clipboard.writeText(pixData.copyPaste);
     setCopied(true);
     sounds.playClick();
-    setTimeout(() => setCopied(false), 2500);
+    setTimeout(() => setCopied(false), 3000);
   };
 
+  // Simula ou força a aprovação
   const handleApprovePayment = () => {
     setIsProcessingApproval(true);
     sounds.playDigitLock();
     setTimeout(() => {
       setIsProcessingApproval(false);
+      if (pollingRef.current) clearInterval(pollingRef.current);
       setStep('registration');
     }, 600);
   };
@@ -167,25 +219,30 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-lg bg-slate-900 border border-emerald-500/40 rounded-3xl shadow-2xl shadow-emerald-950 overflow-hidden my-4 sm:my-8 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
+      <div className="relative w-full max-w-lg bg-slate-900 border border-emerald-500/40 rounded-3xl shadow-2xl shadow-emerald-950 overflow-hidden my-4 sm:my-8 max-h-[92vh] flex flex-col">
         
         {/* Cabeçalho do Modal */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-emerald-900/50 bg-slate-950/60 shrink-0">
-          <div className="flex items-center gap-2 sm:gap-2.5">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
-              <QrCode className="w-4 h-4 sm:w-5 sm:h-5" />
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-emerald-900/50 bg-slate-950/70 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
+              <QrCode className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-extrabold text-white text-sm sm:text-lg">
-                {step === 'payment' && 'Pagamento Pix (Mercado Pago)'}
-                {step === 'registration' && 'Dados do Participante'}
-                {step === 'success' && 'Participação Confirmada! 🎉'}
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-white text-sm sm:text-lg">
+                  {step === 'payment' && 'Pagamento Exclusivo via Pix'}
+                  {step === 'registration' && 'Dados do Participante'}
+                  {step === 'success' && 'Participação Confirmada! 🎉'}
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                  Mercado Pago
+                </span>
+              </div>
               <p className="text-[11px] sm:text-xs text-emerald-300/80">
-                {step === 'payment' && 'Aprovação instantânea'}
-                {step === 'registration' && 'Necessário para contato e pagamento'}
-                {step === 'success' && 'Bilhetes registrados com sucesso'}
+                {step === 'payment' && 'QR Code & Chave Copia e Cola oficial'}
+                {step === 'registration' && 'Necessário para contato e pagamento do prêmio'}
+                {step === 'success' && 'Bilhetes oficiais registrados com sucesso'}
               </p>
             </div>
           </div>
@@ -198,32 +255,33 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
           </button>
         </div>
 
-        {/* Corpo com scroll suave */}
+        {/* Corpo com scroll */}
         <div className="overflow-y-auto flex-1 p-4 sm:p-6">
           
           {/* PASSO 1: PAGAMENTO PIX */}
           {step === 'payment' && (
             <div>
+              
               {/* Resumo da Compra */}
-              <div className="bg-slate-950/80 rounded-2xl p-3 sm:p-4 border border-emerald-900/50 mb-4 flex items-center justify-between">
+              <div className="bg-slate-950/80 rounded-2xl p-3.5 border border-emerald-900/50 mb-4 flex items-center justify-between">
                 <div>
-                  <span className="text-[10px] sm:text-xs text-slate-400 font-medium">Bilhetes:</span>
-                  <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap mt-0.5">
+                  <span className="text-[11px] text-slate-400 font-medium">Milhar(es) Selecionada(s):</span>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1">
                     {selectedNumbers.slice(0, 6).map(n => (
-                      <span key={n} className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-[11px] sm:text-xs border border-emerald-500/40">
+                      <span key={n} className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs border border-emerald-500/40">
                         {n}
                       </span>
                     ))}
                     {selectedNumbers.length > 6 && (
-                      <span className="text-[10px] text-slate-400 font-bold">
+                      <span className="text-[11px] text-slate-400 font-bold">
                         +{selectedNumbers.length - 6} outros
                       </span>
                     )}
                   </div>
                 </div>
                 <div className="text-right pl-3 border-l border-slate-800 shrink-0">
-                  <span className="text-[10px] sm:text-xs text-slate-400">Total:</span>
-                  <div className="text-lg sm:text-xl font-black text-amber-400">
+                  <span className="text-[10px] sm:text-xs text-slate-400">Total a Pagar:</span>
+                  <div className="text-xl sm:text-2xl font-black text-amber-400">
                     {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   </div>
                 </div>
@@ -231,87 +289,103 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
 
               {/* QR Code e Código Pix */}
               {loadingPix ? (
-                <div className="flex flex-col items-center justify-center py-10 gap-3">
-                  <div className="w-8 h-8 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
-                  <p className="text-xs text-slate-400">Gerando cobrança Pix Mercado Pago...</p>
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <div className="w-9 h-9 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
+                  <p className="text-xs text-slate-400">Gerando cobrança Pix oficial no Mercado Pago...</p>
                 </div>
               ) : pixData ? (
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center text-center">
                   
-                  {/* Imagem do QR Code Pix */}
-                  <div className="p-2 sm:p-3 bg-white rounded-2xl shadow-xl border-4 border-emerald-500/30 mb-3 sm:mb-4">
+                  {/* QR Code Pix */}
+                  <div className="p-3 bg-white rounded-2xl shadow-xl border-4 border-emerald-500/40 mb-3 sm:mb-4">
                     {pixData.qrCodeBase64 ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img 
                         src={pixData.qrCodeBase64} 
                         alt="QR Code Pix Mercado Pago" 
-                        className="w-44 h-44 sm:w-56 sm:h-56 object-contain"
+                        className="w-48 h-48 sm:w-56 sm:h-56 object-contain"
                       />
-                    ) : null}
+                    ) : (
+                      <div className="w-48 h-48 flex items-center justify-center text-slate-600 text-xs">
+                        QR Code gerado
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-1.5 text-[11px] sm:text-xs text-emerald-400 font-medium mb-3">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Abra seu app do banco e escaneie ou copie</span>
+                  {/* Status do Polling Automático */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-950 border border-emerald-900/60 text-[11px] text-emerald-400 font-medium mb-3">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    <span>Aguardando pagamento no banco... (Detecção Automática)</span>
                   </div>
 
-                  {/* Código Copia e Cola */}
-                  <div className="w-full bg-slate-950 rounded-xl p-2 sm:p-2.5 border border-slate-800 flex items-center gap-2 mb-3">
-                    <input
-                      type="text"
-                      readOnly
-                      value={pixData.copyPaste}
-                      className="w-full bg-transparent text-[11px] sm:text-xs text-slate-300 font-mono focus:outline-none truncate"
-                    />
-                    <button
-                      onClick={handleCopyPix}
-                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-                        copied 
-                          ? 'bg-emerald-500 text-slate-950' 
-                          : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                      }`}
-                    >
-                      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copied ? 'Copiado!' : 'Copiar Pix'}</span>
-                    </button>
-                  </div>
-
-                  {/* MODO DE TESTE / VALIDAÇÃO DE TRANSAÇÕES */}
-                  <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 sm:p-4 my-1 text-left">
-                    <div className="flex items-center gap-1.5 text-amber-300 font-bold text-xs uppercase tracking-wider mb-1">
-                      <Zap className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Modo de Teste Ativo (Pré-Produção)</span>
+                  {/* Chave Pix Copia e Cola */}
+                  <div className="w-full text-left mb-4">
+                    <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Chave Pix Copia e Cola:
+                    </label>
+                    <div className="w-full bg-slate-950 rounded-xl p-2.5 border border-slate-800 flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={pixData.copyPaste}
+                        className="w-full bg-transparent text-xs text-slate-300 font-mono focus:outline-none truncate select-all"
+                      />
+                      <button
+                        onClick={handleCopyPix}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap shadow-sm ${
+                          copied 
+                            ? 'bg-emerald-500 text-slate-950 font-black' 
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        }`}
+                      >
+                        {copied ? <Check className="w-4 h-4 stroke-[3]" /> : <Copy className="w-4 h-4" />}
+                        <span>{copied ? 'Copiado!' : 'Copiar Chave Pix'}</span>
+                      </button>
                     </div>
-                    <p className="text-[11px] sm:text-xs text-amber-200/80 mb-2.5">
-                      Valide o fluxo completo e a emissão dos bilhetes sem gastar dinheiro real:
-                    </p>
+                  </div>
+
+                  {/* Instruções de Pagamento */}
+                  <div className="w-full bg-slate-950/60 rounded-2xl p-3 border border-slate-800 text-left text-xs text-slate-300 space-y-1.5 mb-4">
+                    <div className="font-bold text-emerald-400 flex items-center gap-1 text-[11px] uppercase tracking-wider">
+                      <Smartphone className="w-3.5 h-3.5" />
+                      <span>Como Pagar:</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">1. Abra o app do seu banco (Nubank, Inter, Itaú, Bradesco, etc.).</p>
+                    <p className="text-[11px] text-slate-400">2. Escolha <strong>Área Pix &gt; Ler QR Code</strong> ou <strong>Pix Copia e Cola</strong>.</p>
+                    <p className="text-[11px] text-slate-400">3. Confirme o valor de <strong>{totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>. O sistema reconhece o pagamento na hora!</p>
+                  </div>
+
+                  {/* Botão de Simulação / Teste Rápido */}
+                  <div className="w-full pt-2 border-t border-slate-800/80">
                     <button
                       onClick={handleApprovePayment}
                       disabled={isProcessingApproval}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all transform active:scale-95"
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-xs border border-amber-500/30 transition-colors"
+                      title="Simular aprovação para testes sem debitar conta"
                     >
                       {isProcessingApproval ? (
-                        <span className="animate-spin text-base">⏳</span>
+                        <span className="animate-spin text-sm">⏳</span>
                       ) : (
-                        <Check className="w-4 h-4 stroke-[3]" />
+                        <Zap className="w-3.5 h-3.5 text-amber-400" />
                       )}
-                      <span>Simular Pagamento Pix Aprovado</span>
+                      <span>Simular Aprovação Imediata (Ambiente de Teste)</span>
                     </button>
                   </div>
 
                 </div>
               ) : null}
+
             </div>
           )}
 
           {/* PASSO 2: CADASTRO DO PARTICIPANTE */}
           {step === 'registration' && (
             <form onSubmit={handleRegisterSubmit}>
-              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 mb-4 flex items-center gap-2.5">
-                <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
-                <div className="text-[11px] sm:text-xs text-emerald-200">
-                  <strong className="text-white block">Pagamento Pix Confirmado!</strong>
-                  Preencha seus dados para receber o prêmio no sorteio de hoje.
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 mb-4 flex items-center gap-3">
+                <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                <div className="text-xs text-emerald-200">
+                  <strong className="text-white block font-bold text-sm">Pagamento Pix Aprovado! 🎉</strong>
+                  Preencha seus dados para receber o prêmio no sorteio de hoje às 19:00h.
                 </div>
               </div>
 
@@ -322,7 +396,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 </div>
               )}
 
-              <div className="space-y-3 sm:space-y-4">
+              <div className="space-y-3.5">
                 <div>
                   <label className="block text-[11px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
                     Nome Completo
@@ -367,7 +441,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                     />
                   </div>
                   <p className="text-[10px] sm:text-[11px] text-slate-400 mt-1">
-                    Enviaremos o lembrete antes das 19h e a mensagem se você for premiado.
+                    Enviaremos o lembrete antes das 19h e a notificação se o seu bilhete for o sorteado.
                   </p>
                 </div>
               </div>
@@ -384,7 +458,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
           {/* PASSO 3: RECIBO DE SUCESSO */}
           {step === 'success' && (
             <div className="text-center py-2">
-              <div className="w-14 h-14 bg-gradient-to-br from-emerald-400 to-green-600 rounded-2xl mx-auto flex items-center justify-center text-slate-950 mb-3 shadow-xl">
+              <div className="w-14 h-14 bg-gradient-to-br from-emerald-400 to-green-600 rounded-2xl mx-auto flex items-center justify-center text-slate-950 mb-3 shadow-xl shadow-emerald-500/25">
                 <PartyPopper className="w-7 h-7" />
               </div>
 

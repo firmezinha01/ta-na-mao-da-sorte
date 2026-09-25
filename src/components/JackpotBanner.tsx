@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Trophy, Clock, Flame, Calendar, Sparkles, ChevronDown } from 'lucide-react';
 import { Sorteio } from '@/types';
+import { sounds } from '@/lib/sound';
+import { getNextDrawTargetDate } from '@/lib/drawTime';
 
 interface JackpotBannerProps {
   sorteio: Sorteio;
@@ -10,42 +12,69 @@ interface JackpotBannerProps {
   totalCombinations?: number;
   onScrollToGrid: () => void;
   onOpenLiveDraw: () => void;
+  onAutoTriggerDraw?: () => void;
 }
 
 export const JackpotBanner: React.FC<JackpotBannerProps> = ({
   sorteio,
   onScrollToGrid,
-  onOpenLiveDraw
+  onOpenLiveDraw,
+  onAutoTriggerDraw
 }) => {
   const [timeLeft, setTimeLeft] = useState<{ hours: number; minutes: number; seconds: number }>({
     hours: 0,
     minutes: 0,
     seconds: 0
   });
+  const [totalSecondsLeft, setTotalSecondsLeft] = useState<number>(9999);
+  const [isLastMinuteAlert, setIsLastMinuteAlert] = useState(false);
+  const [targetLabel, setTargetLabel] = useState('19:00h');
+  const hasTriggeredRef = useRef(false);
 
   useEffect(() => {
     const calculateTimeLeft = () => {
       const now = new Date();
-      const target = new Date();
-      target.setHours(19, 0, 0, 0);
+      const target = getNextDrawTargetDate();
 
-      // Se já passou das 19h hoje, aponta para amanhã às 19h
-      if (now.getTime() > target.getTime()) {
-        target.setDate(target.getDate() + 1);
-      }
+      const targetH = String(target.getHours()).padStart(2, '0');
+      const targetM = String(target.getMinutes()).padStart(2, '0');
+      setTargetLabel(`${targetH}:${targetM}h`);
 
       const diff = Math.max(0, target.getTime() - now.getTime());
+      const totalSec = Math.floor(diff / 1000);
+      setTotalSecondsLeft(totalSec);
+
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((diff % (1000 * 60)) / 1000);
 
       setTimeLeft({ hours, minutes, seconds });
+
+      // Quando faltar 1 minuto (<= 60 segundos) e ainda não zerou
+      if (totalSec <= 60 && totalSec > 0) {
+        setIsLastMinuteAlert(true);
+        // Beep sonoro a cada segundo (mais agudo nos últimos 10 segundos!)
+        sounds.playCountdownBeep(totalSec <= 10);
+      } else {
+        setIsLastMinuteAlert(false);
+      }
+
+      // Quando o cronômetro ZERA (diff === 0) -> Sorteio Automático!
+      if (totalSec === 0 && !hasTriggeredRef.current) {
+        hasTriggeredRef.current = true;
+        sounds.playWinFanfare();
+        if (onAutoTriggerDraw) {
+          onAutoTriggerDraw();
+        } else {
+          onOpenLiveDraw();
+        }
+      }
     };
 
     calculateTimeLeft();
     const interval = setInterval(calculateTimeLeft, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [onAutoTriggerDraw, onOpenLiveDraw]);
 
   const isAccumulated = sorteio.acumulado || sorteio.premio > 500;
   const isSunday = sorteio.eh_domingo;
@@ -68,7 +97,20 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
         ) : (
           <div className="inline-flex items-center gap-1.5 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[11px] sm:text-sm font-bold uppercase tracking-wider mb-3 sm:mb-4">
             <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Sorteio Oficial Diário às 19:00</span>
+            <span>Sorteio Oficial Diário • Transmissão ao Vivo</span>
+          </div>
+        )}
+
+        {/* Alerta de Último Minuto (Faltando <= 60 segundos com som e pisca-pisca) */}
+        {isLastMinuteAlert && (
+          <div className="w-full max-w-xl my-4 p-4 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 text-white shadow-2xl shadow-red-950 border-2 border-yellow-300 animate-pulse">
+            <div className="flex items-center justify-center gap-2 text-sm sm:text-base font-black tracking-wide">
+              <span className="text-2xl animate-spin">🚨</span>
+              <span>ATENÇÃO! O SORTEIO COMEÇA EM {totalSecondsLeft} SEGUNDOS!</span>
+            </div>
+            <p className="text-xs text-yellow-200 mt-1 font-semibold">
+              O sorteio iniciará automaticamente na tela assim que o cronômetro zerar!
+            </p>
           </div>
         )}
 
@@ -90,20 +132,20 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
           {isSunday ? (
             <p className="text-amber-300 font-bold flex flex-col sm:flex-row items-center justify-center gap-1">
               <span>🌟 DOMINGO DA SORTE:</span>
-              <span className="text-slate-200 font-normal">A roleta gira até sair um vencedor garantido e zerar o acumulado!</span>
+              <span className="text-slate-200 font-normal">A roleta gira até sair um vencedor garantido dentre os bilhetes e zerar o acumulativo!</span>
             </p>
           ) : (
             <p>
-              Sem ganhador hoje? <strong className="text-amber-300">O prêmio acumula até domingo</strong>, quando a roleta gira até premiar alguém! Milhar por apenas <strong className="text-emerald-300">R$ 2,00</strong>.
+              Sem ganhador hoje? <strong className="text-amber-300">O prêmio acumula até domingo</strong>, quando a roleta gira até sair um vencedor garantido! Milhar por apenas <strong className="text-emerald-300">R$ 2,00</strong>.
             </p>
           )}
         </div>
 
-        {/* Cronômetro Regressivo para as 19h */}
+        {/* Cronômetro Regressivo */}
         <div className="flex flex-col items-center gap-2 mb-6 sm:mb-8">
           <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-emerald-300 uppercase tracking-wider">
             <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" />
-            <span>Sorteio de hoje às 19h em:</span>
+            <span>Sorteio de hoje às {targetLabel} em:</span>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-4">
@@ -121,8 +163,12 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
               <span className="text-[9px] sm:text-xs text-slate-400 uppercase font-semibold">Minutos</span>
             </div>
             <span className="text-xl sm:text-4xl font-black text-emerald-500 font-mono">:</span>
-            <div className="flex flex-col items-center bg-slate-950/90 border border-emerald-700/50 rounded-xl sm:rounded-2xl px-2.5 py-1.5 sm:px-5 sm:py-3 min-w-[56px] sm:min-w-[80px]">
-              <span className="text-xl sm:text-4xl font-black text-amber-400 font-mono">
+            <div className={`flex flex-col items-center bg-slate-950/90 border rounded-xl sm:rounded-2xl px-2.5 py-1.5 sm:px-5 sm:py-3 min-w-[56px] sm:min-w-[80px] ${
+              isLastMinuteAlert ? 'border-red-500 animate-pulse bg-red-950/40' : 'border-emerald-700/50'
+            }`}>
+              <span className={`text-xl sm:text-4xl font-black font-mono ${
+                isLastMinuteAlert ? 'text-red-400 animate-bounce' : 'text-amber-400'
+              }`}>
                 {String(timeLeft.seconds).padStart(2, '0')}
               </span>
               <span className="text-[9px] sm:text-xs text-slate-400 uppercase font-semibold">Segundos</span>
@@ -130,22 +176,14 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
           </div>
         </div>
 
-        {/* Botões de Ação Principal */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-4 w-full sm:w-auto">
+        {/* Botão de Ação Principal (Sem o botão Assistir/Simular que foi removido a pedido) */}
+        <div className="flex items-center justify-center w-full max-w-md">
           <button
             onClick={onScrollToGrid}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 sm:px-8 sm:py-4 rounded-2xl font-black text-sm sm:text-base bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-lg shadow-emerald-500/30 transition-all transform active:scale-95"
+            className="w-full flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-black text-sm sm:text-base bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-lg shadow-emerald-500/30 transition-all transform active:scale-95"
           >
             <span>Escolher Milhares (R$ 2 cada)</span>
             <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5 animate-bounce" />
-          </button>
-
-          <button
-            onClick={onOpenLiveDraw}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 sm:px-7 sm:py-4 rounded-2xl font-bold text-sm sm:text-base bg-slate-900/90 hover:bg-slate-800 text-emerald-300 border border-emerald-500/40 shadow-md transition-all active:scale-95"
-          >
-            <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" />
-            <span>Assistir / Simular Sorteio</span>
           </button>
         </div>
 
@@ -161,7 +199,7 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
           </div>
           <div className="bg-slate-950/50 p-2 sm:p-2.5 rounded-xl border border-emerald-950 text-center">
             <p className="text-slate-400">Sorteio Oficial</p>
-            <p className="text-xs sm:text-base font-bold text-emerald-400">Diário às 19:00h</p>
+            <p className="text-xs sm:text-base font-bold text-emerald-400">Diário ao Vivo ({targetLabel})</p>
           </div>
         </div>
 

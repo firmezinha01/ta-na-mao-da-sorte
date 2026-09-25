@@ -93,6 +93,30 @@ class SoundManager {
   }
 
   /**
+   * Beep sonoro de contagem regressiva (último minuto antes do sorteio)
+   */
+  playCountdownBeep(isUrgent: boolean = false) {
+    const ctx = this.initCtx();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = isUrgent ? 'square' : 'sine';
+      osc.frequency.setValueAtTime(isUrgent ? 880 : 620, ctx.currentTime);
+
+      gain.gain.setValueAtTime(isUrgent ? 0.25 : 0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + (isUrgent ? 0.18 : 0.12));
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + (isUrgent ? 0.18 : 0.12));
+    } catch (e) {
+      console.warn('Audio play error', e);
+    }
+  }
+
+  /**
    * Fanfarra triunfal de vitória
    */
   playWinFanfare() {

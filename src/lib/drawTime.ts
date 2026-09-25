@@ -61,3 +61,40 @@ export function isSalesCutoffActive(): boolean {
   }
   return false;
 }
+
+/**
+ * Retorna a data/hora do próximo sorteio programado
+ * Inclui o modo de teste automático para esta noite:
+ * Durante a noite de testes (a partir das 20h), programa o sorteio na próxima janela (20:20, 20:25, etc.)
+ * permitindo ao usuário testar o alerta de 1 minuto e a inicialização 100% automática.
+ * E como padrão oficial do app, pontualmente todos os dias às 19:00h.
+ */
+export function getNextDrawTargetDate(): Date {
+  const now = new Date();
+
+  // Modo de teste noturno para validação do usuário (hoje após as 20h)
+  if (now.getHours() === 20 || (now.getHours() === 21 && now.getMinutes() < 30)) {
+    const nextMin = Math.ceil((now.getMinutes() + 1) / 5) * 5;
+    const testTarget = new Date(now);
+    if (nextMin >= 60) {
+      testTarget.setHours(now.getHours() + 1, nextMin - 60, 0, 0);
+    } else {
+      testTarget.setHours(now.getHours(), nextMin, 0, 0);
+    }
+    return testTarget;
+  }
+
+  // Horário padrão oficial: 19:00h de hoje
+  const standardToday = new Date();
+  standardToday.setHours(19, 0, 0, 0);
+
+  if (now.getTime() < standardToday.getTime()) {
+    return standardToday;
+  }
+
+  // Se já passou das 19h (e fora da janela de teste), o próximo é amanhã às 19:00h
+  const tomorrow19h = new Date();
+  tomorrow19h.setDate(tomorrow19h.getDate() + 1);
+  tomorrow19h.setHours(19, 0, 0, 0);
+  return tomorrow19h;
+}

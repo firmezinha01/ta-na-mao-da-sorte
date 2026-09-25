@@ -32,6 +32,7 @@ interface DrawLiveArenaProps {
     mensagensGeradas: Mensagem[];
   }>;
   onStartNewCycle: () => void;
+  autoStart?: boolean;
 }
 
 export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
@@ -41,7 +42,8 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
   soldTickets,
   usuarios,
   onExecuteDraw,
-  onStartNewCycle
+  onStartNewCycle,
+  autoStart
 }) => {
   // Estado dos 4 dígitos sorteados (milhar, centena, dezena, unidade)
   const [digits, setDigits] = useState<[string, string, string, string]>(['-', '-', '-', '-']);
@@ -67,6 +69,16 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
       setAccumulated(false);
     }
   }, [sorteio]);
+
+  // Se autoStart estiver ativo e o sorteio não foi finalizado, inicia automaticamente
+  useEffect(() => {
+    if (autoStart && isOpen && !isSpinning && !drawFinished && sorteio.status !== 'finalizado') {
+      const timer = setTimeout(() => {
+        runDrawAnimation();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [autoStart, isOpen, isSpinning, drawFinished, sorteio.status]);
 
   if (!isOpen) return null;
 

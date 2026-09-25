@@ -31,6 +31,7 @@ export default function Home() {
   // Estados dos Modais
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isLiveDrawOpen, setIsLiveDrawOpen] = useState(false);
+  const [isAutoDrawStart, setIsAutoDrawStart] = useState(false);
   const [isMyTicketsOpen, setIsMyTicketsOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
 
@@ -132,7 +133,14 @@ export default function Home() {
         <JackpotBanner
           sorteio={sorteio}
           onScrollToGrid={handleScrollToGrid}
-          onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
+          onOpenLiveDraw={() => {
+            setIsAutoDrawStart(false);
+            setIsLiveDrawOpen(true);
+          }}
+          onAutoTriggerDraw={() => {
+            setIsAutoDrawStart(true);
+            setIsLiveDrawOpen(true);
+          }}
         />
 
         {/* Tabela de 10.000 Milhares (0000 a 9999) */}
@@ -230,12 +238,16 @@ export default function Home() {
       {/* MODAL 2: Arena do Sorteio das 19h ao Vivo */}
       <DrawLiveArena
         isOpen={isLiveDrawOpen}
-        onClose={() => setIsLiveDrawOpen(false)}
+        onClose={() => {
+          setIsLiveDrawOpen(false);
+          setIsAutoDrawStart(false);
+        }}
         sorteio={sorteio}
         soldTickets={bilhetes}
         usuarios={usuarios}
         onExecuteDraw={handleExecuteDraw}
         onStartNewCycle={handleStartNewCycle}
+        autoStart={isAutoDrawStart}
       />
 
       {/* MODAL 3: Meus Bilhetes Comprados */}

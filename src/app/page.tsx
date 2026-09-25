@@ -3,23 +3,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/Header';
 import { BottomNav } from '@/components/BottomNav';
-import { MobileMenuModal } from '@/components/MobileMenuModal';
-import { MasterPasswordModal } from '@/components/MasterPasswordModal';
 import { JackpotBanner } from '@/components/JackpotBanner';
 import { TicketGrid } from '@/components/TicketGrid';
 import { PixCheckoutModal } from '@/components/PixCheckoutModal';
 import { DrawLiveArena } from '@/components/DrawLiveArena';
 import { MyTicketsModal } from '@/components/MyTicketsModal';
-import { WhatsAppNotificationCenter } from '@/components/WhatsAppNotificationCenter';
 import { RulesModal } from '@/components/RulesModal';
-import { AdminPanel } from '@/components/AdminPanel';
 import { AppStore } from '@/lib/storage';
-import { Bilhete, Mensagem, Sorteio, Usuario } from '@/types';
+import { Bilhete, Sorteio, Usuario } from '@/types';
 import { 
   ShieldCheck, 
   Trophy, 
-  Phone,
-  Lock
+  Phone
 } from 'lucide-react';
 
 export default function Home() {
@@ -27,7 +22,6 @@ export default function Home() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [bilhetes, setBilhetes] = useState<Bilhete[]>([]);
   const [sorteio, setSorteio] = useState<Sorteio | null>(null);
-  const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [testMode, setTestMode] = useState<boolean>(false);
 
@@ -38,80 +32,20 @@ export default function Home() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isLiveDrawOpen, setIsLiveDrawOpen] = useState(false);
   const [isMyTicketsOpen, setIsMyTicketsOpen] = useState(false);
-  const [isWhatsAppHubOpen, setIsWhatsAppHubOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // Autenticação de Administrador (Senha Master para Admin e WhatsApp)
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
-  const [isMasterPasswordModalOpen, setIsMasterPasswordModalOpen] = useState<boolean>(false);
-  const [pendingRestrictedAction, setPendingRestrictedAction] = useState<'admin' | 'whatsapp' | null>(null);
 
   // Carrega os dados na montagem do componente
   const loadData = useCallback(() => {
     setUsuarios(AppStore.getUsuarios());
     setBilhetes(AppStore.getBilhetes());
     setSorteio(AppStore.getSorteio());
-    setMensagens(AppStore.getMensagens());
     setCurrentUser(AppStore.getCurrentUser());
     setTestMode(AppStore.isTestMode());
-
-    if (typeof window !== 'undefined') {
-      const savedAuth = sessionStorage.getItem('tanamao_master_auth') === 'true';
-      if (savedAuth) setIsAdminAuthenticated(true);
-    }
   }, []);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  // Abertura protegida do Painel Admin
-  const handleOpenAdminProtected = () => {
-    if (isAdminAuthenticated) {
-      setIsAdminOpen(true);
-    } else {
-      setPendingRestrictedAction('admin');
-      setIsMasterPasswordModalOpen(true);
-    }
-  };
-
-  // Abertura protegida da Central do WhatsApp
-  const handleOpenWhatsAppProtected = () => {
-    if (isAdminAuthenticated) {
-      setIsWhatsAppHubOpen(true);
-    } else {
-      setPendingRestrictedAction('whatsapp');
-      setIsMasterPasswordModalOpen(true);
-    }
-  };
-
-  // Sucesso na digitação da Senha Master
-  const handleMasterAuthSuccess = () => {
-    setIsAdminAuthenticated(true);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('tanamao_master_auth', 'true');
-    }
-    setIsMasterPasswordModalOpen(false);
-
-    if (pendingRestrictedAction === 'admin') {
-      setIsAdminOpen(true);
-    } else if (pendingRestrictedAction === 'whatsapp') {
-      setIsWhatsAppHubOpen(true);
-    }
-    setPendingRestrictedAction(null);
-  };
-
-  // Bloquear e encerrar sessão de administrador
-  const handleMasterLogout = () => {
-    setIsAdminAuthenticated(false);
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('tanamao_master_auth');
-    }
-    setIsAdminOpen(false);
-    setIsWhatsAppHubOpen(false);
-  };
 
   // Bilhetes pertencentes ao usuário logado ou da sessão
   const myTickets = currentUser 
@@ -163,64 +97,6 @@ export default function Home() {
     loadData();
   };
 
-  // Disparo em massa de lembrete diário
-  const handleTriggerDailyReminder = async () => {
-    await AppStore.broadcastDailyReminder();
-    loadData();
-  };
-
-  // Alterna Modo de Teste
-  const handleToggleTestMode = () => {
-    const nextState = !testMode;
-    AppStore.setTestMode(nextState);
-    setTestMode(nextState);
-  };
-
-  // Gerador rápido de vendas para testes
-  const handleGenerateQuickSales = (count: number) => {
-    const soldSet = new Set(bilhetes.map(b => b.numero_milhar));
-    const availablePool: string[] = [];
-
-    for (let i = 0; i < 10000; i++) {
-      const numStr = i.toString().padStart(4, '0');
-      if (!soldSet.has(numStr)) availablePool.push(numStr);
-    }
-
-    const sampleUsers = [
-      { nome_completo: 'Carlos Eduardo Mendes', cpf: '123.456.789-00', whatsapp: '11987654321' },
-      { nome_completo: 'Mariana Silva Santos', cpf: '234.567.890-11', whatsapp: '21976543210' },
-      { nome_completo: 'Roberto Oliveira Lima', cpf: '345.678.901-22', whatsapp: '31985432109' },
-      { nome_completo: 'Fernanda Costa Ribeiro', cpf: '456.789.012-33', whatsapp: '41994321098' },
-      { nome_completo: 'Lucas Gabriel Moreira', cpf: '567.890.123-44', whatsapp: '19998877665' },
-      { nome_completo: 'Juliana Aparecida Souza', cpf: '678.901.234-55', whatsapp: '81987651234' }
-    ];
-
-    for (let i = 0; i < count && availablePool.length > 0; i++) {
-      const randomIndex = Math.floor(Math.random() * availablePool.length);
-      const picked = availablePool[randomIndex];
-      availablePool.splice(randomIndex, 1);
-
-      const randomUser = sampleUsers[Math.floor(Math.random() * sampleUsers.length)];
-      AppStore.purchaseTickets([picked], randomUser);
-    }
-
-    loadData();
-  };
-
-  // Reset total dos dados
-  const handleResetData = () => {
-    AppStore.resetToDefault();
-    loadData();
-  };
-
-  // Ajuste do prêmio
-  const handleAdjustPrize = (newPrize: number) => {
-    const current = AppStore.getSorteio();
-    current.premio = newPrize;
-    localStorage.setItem('tanamao_sorteio_v1', JSON.stringify(current));
-    loadData();
-  };
-
   // Scroll suave até a tabela de milhares
   const handleScrollToGrid = () => {
     const el = document.getElementById('ticket-grid-section');
@@ -243,16 +119,10 @@ export default function Home() {
       {/* Navegação Superior */}
       <Header
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
-        onOpenWhatsAppHub={handleOpenWhatsAppProtected}
-        onOpenAdmin={handleOpenAdminProtected}
         onOpenRules={() => setIsRulesOpen(true)}
         onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
         myTicketsCount={myTickets.length}
-        unreadMessagesCount={mensagens.length}
         currentUser={currentUser}
-        testMode={testMode}
-        onToggleTestMode={handleToggleTestMode}
-        isAdminAuthenticated={isAdminAuthenticated}
       />
 
       {/* Conteúdo Principal */}
@@ -313,7 +183,7 @@ export default function Home() {
 
       </main>
 
-      {/* Rodapé Oficial */}
+      {/* Rodapé Oficial (Público e Limpo) */}
       <footer className="w-full bg-slate-950 border-t border-emerald-950/80 py-6 sm:py-8 text-xs text-slate-400 mb-16 sm:mb-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-center sm:text-left">
           <div className="flex items-center gap-2">
@@ -327,13 +197,11 @@ export default function Home() {
             <button onClick={() => setIsRulesOpen(true)} className="hover:text-emerald-400 transition-colors">
               Regulamento
             </button>
-            <button onClick={handleOpenWhatsAppProtected} className="hover:text-green-400 transition-colors flex items-center gap-1">
-              <span>WhatsApp</span>
-              {!isAdminAuthenticated && <Lock className="w-3 h-3 text-amber-400" />}
+            <button onClick={() => setIsMyTicketsOpen(true)} className="hover:text-cyan-400 transition-colors">
+              Meus Bilhetes
             </button>
-            <button onClick={handleOpenAdminProtected} className="hover:text-amber-400 transition-colors flex items-center gap-1">
-              <span>Painel Admin</span>
-              {!isAdminAuthenticated && <Lock className="w-3 h-3 text-amber-400" />}
+            <button onClick={() => setIsLiveDrawOpen(true)} className="hover:text-amber-400 transition-colors">
+              Sorteio das 19h
             </button>
           </div>
 
@@ -348,35 +216,8 @@ export default function Home() {
         onScrollToGrid={handleScrollToGrid}
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         onOpenLiveDraw={() => setIsLiveDrawOpen(true)}
-        onOpenWhatsAppHub={handleOpenWhatsAppProtected}
-        onOpenMenu={() => setIsMobileMenuOpen(true)}
-        myTicketsCount={myTickets.length}
-        unreadMessagesCount={mensagens.length}
-        isAdminAuthenticated={isAdminAuthenticated}
-      />
-
-      {/* MODAL MENU MOBILE (Mais Opções) */}
-      <MobileMenuModal
-        isOpen={isMobileMenuOpen}
-        onClose={() => setIsMobileMenuOpen(false)}
         onOpenRules={() => setIsRulesOpen(true)}
-        onOpenAdmin={handleOpenAdminProtected}
-        onOpenWhatsAppHub={handleOpenWhatsAppProtected}
-        testMode={testMode}
-        onToggleTestMode={handleToggleTestMode}
-        currentUser={currentUser}
-        isAdminAuthenticated={isAdminAuthenticated}
-      />
-
-      {/* MODAL DE SENHA MASTER (Proteção contra acesso não autorizado) */}
-      <MasterPasswordModal
-        isOpen={isMasterPasswordModalOpen}
-        onClose={() => {
-          setIsMasterPasswordModalOpen(false);
-          setPendingRestrictedAction(null);
-        }}
-        onSuccess={handleMasterAuthSuccess}
-        targetTitle={pendingRestrictedAction === 'admin' ? 'Painel Administrativo' : 'Central do WhatsApp'}
+        myTicketsCount={myTickets.length}
       />
 
       {/* MODAL 1: Checkout Pix (Mercado Pago Oficial) */}
@@ -409,35 +250,10 @@ export default function Home() {
         currentSorteio={sorteio}
       />
 
-      {/* MODAL 4: Central de Notificações do WhatsApp (Protegido por Senha Master) */}
-      <WhatsAppNotificationCenter
-        isOpen={isWhatsAppHubOpen}
-        onClose={() => setIsWhatsAppHubOpen(false)}
-        mensagens={mensagens}
-        onTriggerDailyReminder={handleTriggerDailyReminder}
-        registeredUsersCount={usuarios.length}
-        onLogout={handleMasterLogout}
-      />
-
-      {/* MODAL 5: Regras e Como Funciona */}
+      {/* MODAL 4: Regras e Como Funciona */}
       <RulesModal
         isOpen={isRulesOpen}
         onClose={() => setIsRulesOpen(false)}
-      />
-
-      {/* MODAL 6: Painel de Controle / Administração (Protegido por Senha Master) */}
-      <AdminPanel
-        isOpen={isAdminOpen}
-        onClose={() => setIsAdminOpen(false)}
-        sorteio={sorteio}
-        soldTickets={bilhetes}
-        usuarios={usuarios}
-        testMode={testMode}
-        onToggleTestMode={handleToggleTestMode}
-        onGenerateQuickSales={handleGenerateQuickSales}
-        onResetData={handleResetData}
-        onAdjustPrize={handleAdjustPrize}
-        onLogout={handleMasterLogout}
       />
 
     </div>

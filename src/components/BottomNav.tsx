@@ -2,47 +2,36 @@
 
 import React from 'react';
 import { 
-  Sparkles, 
   Ticket, 
   Trophy, 
-  MessageSquare, 
-  Menu,
-  HelpCircle,
-  Settings,
-  Lock
+  HelpCircle
 } from 'lucide-react';
 
 interface BottomNavProps {
   onScrollToGrid: () => void;
   onOpenMyTickets: () => void;
   onOpenLiveDraw: () => void;
-  onOpenWhatsAppHub: () => void;
-  onOpenMenu: () => void;
+  onOpenRules: () => void;
   myTicketsCount: number;
-  unreadMessagesCount: number;
-  isAdminAuthenticated?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   onScrollToGrid,
   onOpenMyTickets,
   onOpenLiveDraw,
-  onOpenWhatsAppHub,
-  onOpenMenu,
-  myTicketsCount,
-  unreadMessagesCount,
-  isAdminAuthenticated = false
+  onOpenRules,
+  myTicketsCount
 }) => {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-emerald-900/60 px-2 py-1.5 sm:hidden transition-all shadow-[0_-8px_20px_rgba(0,0,0,0.5)]">
-      <div className="flex items-center justify-around max-w-md mx-auto">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-emerald-900/60 px-4 py-2 sm:hidden transition-all shadow-[0_-8px_20px_rgba(0,0,0,0.5)]">
+      <div className="flex items-center justify-around max-w-sm mx-auto">
         
         {/* Início / Bilhetes */}
         <button
           onClick={onScrollToGrid}
           className="flex flex-col items-center justify-center p-1.5 text-slate-400 hover:text-emerald-400 active:scale-95 transition-all"
         >
-          <span className="text-lg">🍀</span>
+          <span className="text-xl">🍀</span>
           <span className="text-[10px] font-bold mt-0.5">Milhares</span>
         </button>
 
@@ -52,7 +41,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           className="relative flex flex-col items-center justify-center p-1.5 text-slate-400 hover:text-cyan-400 active:scale-95 transition-all"
         >
           <Ticket className="w-5 h-5 text-cyan-400" />
-          <span className="text-[10px] font-bold mt-0.5">Meus</span>
+          <span className="text-[10px] font-bold mt-0.5">Meus Bilhetes</span>
           {myTicketsCount > 0 && (
             <span className="absolute top-0 right-2 w-4 h-4 bg-emerald-500 text-slate-950 rounded-full text-[9px] font-black flex items-center justify-center">
               {myTicketsCount}
@@ -73,34 +62,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           </span>
         </button>
 
-        {/* WhatsApp Hub (Requer Senha Master) */}
+        {/* Como Funciona / Regras */}
         <button
-          onClick={onOpenWhatsAppHub}
-          className="relative flex flex-col items-center justify-center p-1.5 text-slate-400 hover:text-green-400 active:scale-95 transition-all"
-        >
-          <div className="relative">
-            <MessageSquare className="w-5 h-5 text-green-400" />
-            {!isAdminAuthenticated && (
-              <span className="absolute -bottom-1 -right-1.5 w-3.5 h-3.5 bg-slate-950 rounded-full flex items-center justify-center border border-amber-400">
-                <Lock className="w-2 h-2 text-amber-400" />
-              </span>
-            )}
-          </div>
-          <span className="text-[10px] font-bold mt-0.5">WhatsApp</span>
-          {unreadMessagesCount > 0 && isAdminAuthenticated && (
-            <span className="absolute top-0 right-2 w-4 h-4 bg-green-500 text-slate-950 rounded-full text-[9px] font-black flex items-center justify-center">
-              {unreadMessagesCount}
-            </span>
-          )}
-        </button>
-
-        {/* Menu / Mais */}
-        <button
-          onClick={onOpenMenu}
+          onClick={onOpenRules}
           className="flex flex-col items-center justify-center p-1.5 text-slate-400 hover:text-amber-400 active:scale-95 transition-all"
         >
-          <Menu className="w-5 h-5 text-slate-300" />
-          <span className="text-[10px] font-bold mt-0.5">Mais</span>
+          <HelpCircle className="w-5 h-5 text-amber-400" />
+          <span className="text-[10px] font-bold mt-0.5">Regras</span>
         </button>
 
       </div>

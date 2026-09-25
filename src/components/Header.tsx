@@ -4,41 +4,24 @@ import React from 'react';
 import { 
   Trophy, 
   Ticket, 
-  MessageSquare, 
-  Settings, 
-  HelpCircle, 
-  CheckCircle2, 
-  AlertTriangle,
-  Lock
+  HelpCircle
 } from 'lucide-react';
 import { Usuario } from '@/types';
 
 interface HeaderProps {
   onOpenMyTickets: () => void;
-  onOpenWhatsAppHub: () => void;
-  onOpenAdmin: () => void;
   onOpenRules: () => void;
   onOpenLiveDraw: () => void;
   myTicketsCount: number;
-  unreadMessagesCount: number;
   currentUser: Usuario | null;
-  testMode: boolean;
-  onToggleTestMode: () => void;
-  isAdminAuthenticated?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenMyTickets,
-  onOpenWhatsAppHub,
-  onOpenAdmin,
   onOpenRules,
   onOpenLiveDraw,
   myTicketsCount,
-  unreadMessagesCount,
-  currentUser,
-  testMode,
-  onToggleTestMode,
-  isAdminAuthenticated = false
+  currentUser
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full bg-slate-950/95 backdrop-blur-md border-b border-emerald-900/40 text-white">
@@ -57,51 +40,32 @@ export const Header: React.FC<HeaderProps> = ({
                 <h1 className="font-extrabold text-base sm:text-2xl tracking-tight bg-gradient-to-r from-emerald-300 via-yellow-300 to-amber-400 bg-clip-text text-transparent">
                   Tá Na Mão da SORTE
                 </h1>
-                {testMode ? (
-                  <button 
-                    onClick={onToggleTestMode}
-                    title="Clique para alternar modo"
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-colors"
-                  >
-                    <AlertTriangle className="w-2.5 h-2.5" />
-                    <span>TESTE</span>
-                  </button>
-                ) : (
-                  <button 
-                    onClick={onToggleTestMode}
-                    title="Clique para alternar modo"
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
-                  >
-                    <CheckCircle2 className="w-2.5 h-2.5" />
-                    <span>PRODUÇÃO</span>
-                  </button>
-                )}
               </div>
               <p className="text-[10px] sm:text-xs text-emerald-300/70 font-medium hidden sm:block">
-                Bingo & Loteria Digital • Sorteios Diários às 19h • R$ 2,00 a Milhar
+                Bingo &amp; Loteria Digital • Sorteios Diários às 19h • R$ 2,00 a Milhar
               </p>
             </div>
           </div>
 
           {/* Ações e Navegação */}
-          <div className="flex items-center gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {/* Botão Sorteio ao Vivo (visível em desktop, no mobile fica em destaque na barra inferior) */}
             <button
               onClick={onOpenLiveDraw}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white shadow-md shadow-red-900/30 transition-all transform active:scale-95 animate-pulse"
+              className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white shadow-md shadow-red-900/30 transition-all transform active:scale-95 animate-pulse"
             >
               <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-yellow-300" />
               <span>Sorteio 19h</span>
             </button>
 
-            {/* Meus Bilhetes (Desktop) */}
+            {/* Meus Bilhetes */}
             <button
               onClick={onOpenMyTickets}
-              className="hidden sm:flex relative items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-200 border border-emerald-700/50 transition-colors"
+              className="flex relative items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-200 border border-emerald-700/50 transition-colors"
               title="Ver meus bilhetes comprados"
             >
               <Ticket className="w-4 h-4 text-emerald-400" />
-              <span className="hidden md:inline">Meus Bilhetes</span>
+              <span className="hidden sm:inline">Meus Bilhetes</span>
               {myTicketsCount > 0 && (
                 <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold bg-emerald-500 text-slate-950 rounded-full">
                   {myTicketsCount}
@@ -109,51 +73,14 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* WhatsApp Hub (Desktop - Requer Senha Master) */}
-            <button
-              onClick={onOpenWhatsAppHub}
-              className={`hidden sm:flex relative p-2 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-colors items-center gap-1.5 ${
-                isAdminAuthenticated
-                  ? 'bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-200 border-emerald-700/50'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800'
-              }`}
-              title={isAdminAuthenticated ? "Central de Mensagens do WhatsApp" : "Acesso Restrito: WhatsApp Hub (Requer Senha Master)"}
-            >
-              <MessageSquare className="w-4 h-4 text-green-400" />
-              <span className="hidden lg:inline">WhatsApp</span>
-              {!isAdminAuthenticated && (
-                <Lock className="w-3 h-3 text-amber-400" />
-              )}
-              {unreadMessagesCount > 0 && isAdminAuthenticated && (
-                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-green-500 text-[9px] font-bold text-slate-950">
-                  {unreadMessagesCount}
-                </span>
-              )}
-            </button>
-
-            {/* Regras (Desktop) */}
+            {/* Regras (Como Funciona) */}
             <button
               onClick={onOpenRules}
-              className="hidden sm:block p-2 sm:px-2.5 sm:py-2 rounded-xl text-xs font-semibold bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/50 transition-colors"
+              className="p-2 sm:px-2.5 sm:py-2 rounded-xl text-xs font-semibold bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/50 transition-colors flex items-center gap-1"
               title="Como Funciona / Regras"
             >
               <HelpCircle className="w-4 h-4 text-amber-400" />
-            </button>
-
-            {/* Admin (Desktop e Mobile - Requer Senha Master) */}
-            <button
-              onClick={onOpenAdmin}
-              className={`relative p-2 sm:px-2.5 sm:py-2 rounded-xl text-xs font-semibold border transition-colors flex items-center gap-1 ${
-                isAdminAuthenticated
-                  ? 'bg-amber-950/40 text-amber-300 border-amber-500/50'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800'
-              }`}
-              title={isAdminAuthenticated ? "Painel de Administração" : "Acesso Restrito: Painel Admin (Requer Senha Master)"}
-            >
-              <Settings className="w-4 h-4" />
-              {!isAdminAuthenticated && (
-                <Lock className="w-2.5 h-2.5 text-amber-400 -ml-0.5" />
-              )}
+              <span className="hidden md:inline">Regras</span>
             </button>
 
             {/* Usuário Logado */}

@@ -202,6 +202,20 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     }
 
     setFormError('');
+
+    // Salva o participante e os bilhetes no banco de dados (Supabase / Server DB)
+    fetch('/api/participants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nome_completo: nomeCompleto.trim(),
+        cpf: cleanCpf,
+        whatsapp: cleanPhone,
+        tickets: selectedNumbers,
+        paymentId: pixData?.paymentId
+      })
+    }).catch(err => console.warn('Erro ao salvar participante no DB:', err));
+
     onPaymentComplete({
       nome_completo: nomeCompleto.trim(),
       cpf: cleanCpf,

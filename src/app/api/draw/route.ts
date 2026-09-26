@@ -12,9 +12,10 @@ export async function GET() {
   try {
     const serverTime = Date.now();
     let schedule = getNextDrawSchedule();
-    const [draw, tickets] = await Promise.all([
+    const [draw, tickets, lastFinishedDraw] = await Promise.all([
       ServerDrawService.getCurrentOrScheduledDraw(),
-      ServerDrawService.getConfirmedTickets()
+      ServerDrawService.getConfirmedTickets(),
+      ServerDrawService.getLastFinishedDraw()
     ]);
     const isCutoff = isSalesCutoffActive();
 
@@ -50,7 +51,8 @@ export async function GET() {
       draw,
       tickets,
       schedule,
-      isCutoff
+      isCutoff,
+      lastFinishedDraw
     });
   } catch (error) {
     console.error('Erro em GET /api/draw:', error);
@@ -89,7 +91,8 @@ export async function POST(request: Request) {
       sorteio: result.sorteio,
       milhar: result.milhar,
       ganhador: result.ganhador,
-      mensagensGeradas: result.mensagensGeradas
+      mensagensGeradas: result.mensagensGeradas,
+      girosDomingo: result.girosDomingo || null
     });
   } catch (error) {
     console.error('Erro em POST /api/draw:', error);

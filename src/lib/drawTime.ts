@@ -11,6 +11,7 @@ export interface BrasiliaTimeComponents {
   hour: number;
   minute: number;
   second: number;
+  dayOfWeek: number; // 0 (Dom) a 6 (Sáb)
   isSunday: boolean;
   raw: Date;
 }
@@ -50,7 +51,15 @@ export function getBrasiliaComponents(date: Date = new Date()): BrasiliaTimeComp
     const year = parseInt(getPart('year') || String(date.getFullYear()), 10);
     const month = parseInt(getPart('month') || '1', 10) - 1;
     const day = parseInt(getPart('day') || '1', 10);
-    const weekday = getPart('weekday') || '';
+    const weekday = (getPart('weekday') || '').toLowerCase();
+
+    const weekdays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    let dayOfWeek = weekdays.findIndex(w => weekday.includes(w));
+    if (dayOfWeek === -1) {
+      const utcMs = date.getTime();
+      const brMs = utcMs - 3 * 3600 * 1000;
+      dayOfWeek = new Date(brMs).getUTCDay();
+    }
 
     return {
       year,
@@ -59,18 +68,23 @@ export function getBrasiliaComponents(date: Date = new Date()): BrasiliaTimeComp
       hour,
       minute,
       second,
-      isSunday: weekday.toLowerCase().includes('sun') || weekday.toLowerCase().includes('dom'),
+      dayOfWeek,
+      isSunday: dayOfWeek === 0 || weekday.includes('sun') || weekday.includes('dom'),
       raw: date
     };
   } catch {
+    const utcMs = date.getTime();
+    const brMs = utcMs - 3 * 3600 * 1000;
+    const d = new Date(brMs);
     return {
-      year: date.getFullYear(),
-      month: date.getMonth(),
-      day: date.getDate(),
-      hour: date.getHours(),
-      minute: date.getMinutes(),
-      second: date.getSeconds(),
-      isSunday: date.getDay() === 0,
+      year: d.getUTCFullYear(),
+      month: d.getUTCMonth(),
+      day: d.getUTCDate(),
+      hour: d.getUTCHours(),
+      minute: d.getUTCMinutes(),
+      second: d.getUTCSeconds(),
+      dayOfWeek: d.getUTCDay(),
+      isSunday: d.getUTCDay() === 0,
       raw: date
     };
   }
@@ -151,3 +165,51 @@ export function getNextDrawTargetDate(): Date {
   const schedule = getNextDrawSchedule();
   return new Date(schedule.targetTimestamp);
 }
+
+/**
+ * Retorna a data exata da última Segunda-feira às 10:00h no horário oficial de Brasília.
+ * Utilizado para a regra do cliente de apagar os dados do sorteio anterior toda segunda às 10h.
+ */
+export function getLastMonday10AM(referenceDate: Date = new Date()): Date {
+  const b = getBrasiliaComponents(referenceDate);
+  let daysToSubtract = 0;
+  if (b.dayOfWeek === 1) { // Segunda-feira
+    daysToSubtract = b.hour >= 10 ? 0 : 7;
+  } else if (b.dayOfWeek === 0) { // Domingo
+    daysToSubtract = 6;
+  } else { // Terça (2) a Sábado (6)
+    daysToSubtract = b.dayOfWeek - 1;
+  }
+
+  const refTime = referenceDate.getTime() - daysToSubtract * 24 * 3600 * 1000;
+  const targetB = getBrasiliaComponents(new Date(refTime));
+  const isoStr = `${targetB.year}-${String(targetB.month + 1).padStart(2, '0')}-${String(targetB.day).padStart(2, '0')}T10:00:00-03:00`;
+  return new Date(isoStr);
+}
+
+/**
+ * Regra do Cliente:
+ * "deixe a milhar salva em algum campo para o jogador ver a milhar que saiu e o primeiro nome do ganahdor
+ * e os 4 numeros finais do telefone quando for segunda as 10 da manha sempre apagar esses dados do sorteio"
+ *
+ * Retorna true se o sorteio deve ser exibido, ou false se já expirou pelo corte de Segunda-feira às 10:00h.
+ */
+export function shouldShowLastDrawResult(drawDateIso: string, referenceDate: Date = new Date()): boolean {
+  try {
+    const drawTimestamp = new Date(drawDateIso).getTime();
+    if (isNaN(drawTimestamp)) return false;
+
+    // Se o sorteio foi realizado há menos de 10 minutos (ex: durante testes ou simulações recentes), sempre exibe
+    if (Date.now() - drawTimestamp < 10 * 60 * 1000) {
+      return true;
+    }
+
+    const lastMonday10AM = getLastMonday10AM(referenceDate);
+    // Se o sorteio foi realizado após ou na última segunda-feira às 10h, exibe na tela.
+    // Se foi realizado antes, foi apagado pelo corte semanal.
+    return drawTimestamp >= lastMonday10AM.getTime();
+  } catch {
+    return true;
+  }
+}
+

@@ -9,7 +9,8 @@ import {
   AlertTriangle,
   RotateCw,
   Crown,
-  MessageCircle
+  MessageCircle,
+  Clock
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Sorteio, Usuario, Bilhete, Mensagem } from '@/types';
@@ -27,6 +28,7 @@ interface DrawLiveArenaProps {
     ganhador: Usuario | null;
     milhar: string;
     mensagensGeradas: Mensagem[];
+    girosDomingo?: string[];
   }>;
   onStartNewCycle: () => void;
   autoStart?: boolean;
@@ -53,6 +55,27 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
   // Estado para regra do Domingo: "não houve ganhador, vamos girar novamente"
   const [sundayRetryNotice, setSundayRetryNotice] = useState<string | null>(null);
   const [sundayCountdown, setSundayCountdown] = useState<number>(0);
+
+  // ⏱️ REGRA DO CLIENTE: Fechar automaticamente o modal após 1 minuto (60 segundos)
+  const [autoCloseSeconds, setAutoCloseSeconds] = useState<number>(60);
+
+  useEffect(() => {
+    if (!drawFinished || !isOpen) {
+      setAutoCloseSeconds(60);
+      return;
+    }
+    const timer = setInterval(() => {
+      setAutoCloseSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          onClose();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [drawFinished, isOpen, onClose]);
 
   // Trava para executar apenas uma única vez e parar
   const hasTriggeredOnceRef = useRef(false);
@@ -133,18 +156,21 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
     // 🌟 REGRA ESPECIAL DE DOMINGO (4 GIROS NA TELA):
     // Giros 1, 2 e 3: Não houve ganhador nesta rodada, vamos girar novamente!
     // Giro 4: Cai na milhar vencedora, toca fanfarra, envia WhatsApp e libera o prêmio!
-    if (isSunday && drawResult.ganhador) {
+    if (isSunday && (drawResult.girosDomingo || drawResult.ganhador)) {
+      const serverSpins = drawResult.girosDomingo && drawResult.girosDomingo.length === 4
+        ? drawResult.girosDomingo
+        : null;
+
       const soldNumbers = new Set(soldTickets.map(b => b.numero_milhar));
       soldNumbers.add(drawResult.milhar);
 
-      // Executa os 3 primeiros giros sem ganhador
+      // Executa os 3 primeiros giros sem ganhador (utilizando os números idênticos enviados pelo servidor)
       for (let round = 1; round <= 3; round++) {
-        let dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-        while (soldNumbers.has(dummyNumber)) {
-          dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-        }
+        let dummyNumber = serverSpins
+          ? serverSpins[round - 1]
+          : String(Math.floor(Math.random() * 10000)).padStart(4, '0');
 
-        // Gira os 4 tambores até o número dummy
+        // Gira os 4 tambores até o número dummy oficial
         await spinDrumsToTarget(dummyNumber);
 
         // Som de alerta e banner de aviso
@@ -169,10 +195,10 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
         setSundayRetryNotice(null);
       }
 
-      // 4º Giro Triunfal: Gira e cai na milhar vencedora garantida!
+      // 4º Giro Triunfal: Gira e cai na milhar vencedora oficial garantida!
       await spinDrumsToTarget(drawResult.milhar);
     } else {
-      // Sorteio diário padrão (Segunda a Sábado): gira uma única vez
+      // Sorteio diário padrão (Segunda a Sábado): gira uma única vez diretamente para a milhar oficial
       await spinDrumsToTarget(drawResult.milhar);
     }
 
@@ -349,14 +375,20 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
           </div>
         )}
 
-        {/* BOTÃO PARA FECHAR E PARAR (SEM LOOPS) */}
-        <div className="flex items-center justify-center pt-3 sm:pt-4 border-t border-emerald-900/50">
+        {/* BOTÃO PARA FECHAR E PARAR (COM TIMER DE 1 MINUTO) */}
+        <div className="flex flex-col items-center justify-center pt-3 sm:pt-4 border-t border-emerald-900/50">
           <button
             onClick={onClose}
             className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm border border-slate-700 transition-all active:scale-95"
           >
             <span>Fechar e Acompanhar Próxima Rodada</span>
           </button>
+          {drawFinished && (
+            <div className="flex items-center justify-center gap-1.5 mt-2.5 text-xs text-slate-400 font-semibold">
+              <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+              <span>Esta tela fechará automaticamente em <strong className="text-amber-400 font-mono font-bold text-sm">{autoCloseSeconds}s</strong></span>
+            </div>
+          )}
         </div>
 
       </div>

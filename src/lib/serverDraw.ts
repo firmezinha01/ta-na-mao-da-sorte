@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { Bilhete, Mensagem, Sorteio, Usuario } from '@/types';
-import { getNextDrawSchedule } from './drawTime';
+import { getNextDrawSchedule, shouldShowLastDrawResult } from './drawTime';
 import { WhatsAppTemplates, sendWhatsAppMessage } from './whatsapp';
 import fs from 'fs';
 import path from 'path';
@@ -26,11 +26,32 @@ function writeLocalDbFallback(data: any) {
   } catch {}
 }
 
+/**
+ * Gerador pseudo-aleatório determinístico baseado em seed (ID do sorteio + data).
+ * Garante que QUALQUER servidor ou requisição concorrente produza RIGOROSAMENTE
+ * o mesmo número e a mesma sequência de giros, eliminando divergência entre PC e celular.
+ */
+function createDeterministicRng(seedStr: string): () => number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = Math.imul(h ^ seedStr.charCodeAt(i), 16777619);
+  }
+  return function() {
+    h += h << 13;
+    h ^= h >>> 7;
+    h += h << 3;
+    h ^= h >>> 17;
+    h += h << 5;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
 export interface DrawExecutionResult {
   sorteio: Sorteio;
   milhar: string;
   ganhador: Usuario | null;
   mensagensGeradas: Mensagem[];
+  girosDomingo?: string[]; // Sequência idêntica dos 4 giros enviada para todos os aparelhos
 }
 
 export class ServerDrawService {
@@ -48,6 +69,7 @@ export class ServerDrawService {
     sorteio: Sorteio;
     ganhador: Usuario | null;
     mensagensGeradas: Mensagem[];
+    girosDomingo?: string[];
     timestamp: number;
   } | null = null;
 
@@ -313,7 +335,11 @@ export class ServerDrawService {
       };
     }
 
-    // 5. Busca bilhetes vendidos confirmados
+    // 5. Inicializa gerador determinístico baseado no ID e Data do Sorteio
+    // (Impede terminantemente que qualquer aparelho ou requisição paralela gere números diferentes)
+    const rng = createDeterministicRng(`${targetDraw.id}_${targetDraw.data_sorteio}`);
+
+    // Busca bilhetes vendidos confirmados
     const bilhetes = await this.getConfirmedTickets();
     const isSunday = options?.isSunday ?? targetDraw.eh_domingo ?? false;
 
@@ -327,6 +353,7 @@ export class ServerDrawService {
     let ganhadorUsuario: Usuario | null = null;
     let foiAcumulado = false;
     let novoPremio = 500;
+    let girosDomingo: string[] | undefined = undefined;
 
     // =========================================================================
     // CASO A: SIMULAÇÃO DA SEMANA (ETAPAS 1 A 7)
@@ -334,9 +361,9 @@ export class ServerDrawService {
     if (isSimulacao && stepNum >= 1 && stepNum <= 6) {
       // 🌟 ETAPAS 1 A 6 (Segunda a Sábado): NÃO SAI GANHADOR! Acumula R$ 500 por etapa
       const soldSet = new Set(bilhetes.map(b => b.numero_milhar));
-      let rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      let rand = String(Math.floor(rng() * 10000)).padStart(4, '0');
       while (soldSet.has(rand)) {
-        rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        rand = String(Math.floor(rng() * 10000)).padStart(4, '0');
       }
 
       milharSorteado = rand;
@@ -377,7 +404,7 @@ export class ServerDrawService {
       }
     } else if (isSimulacao && stepNum === 7) {
       // 🌟 ETAPA 7 (DOMINGO DA SORTE): SAI GANHADOR GARANTIDO E LIBERA O PRÊMIO!
-      let winningTicket = bilhetes.length > 0 ? bilhetes[0] : undefined;
+      let winningTicket = bilhetes.length > 0 ? bilhetes[Math.floor(rng() * bilhetes.length)] : undefined;
 
       // Se nenhum bilhete foi comprado, seleciona o participante cadastrado no Supabase
       if (!winningTicket) {
@@ -416,6 +443,20 @@ export class ServerDrawService {
       foiAcumulado = false;
       novoPremio = 500;
 
+      // 🌟 GERA OS 3 GIROS DUMMY CENTRALIZADOS NO SERVIDOR (DOMINGO DA SORTE):
+      // Garante que TODOS os aparelhos (PC, celular) recebam os mesmos 3 giros sem ganhador
+      // e depois cravem na milhar vencedora no 4º giro!
+      const soldNumbers = new Set(bilhetes.map(b => b.numero_milhar));
+      soldNumbers.add(milharSorteado);
+      const dummySpins: string[] = [];
+      while (dummySpins.length < 3) {
+        const dummy = String(Math.floor(rng() * 10000)).padStart(4, '0');
+        if (!soldNumbers.has(dummy) && !dummySpins.includes(dummy)) {
+          dummySpins.push(dummy);
+        }
+      }
+      girosDomingo = [...dummySpins, milharSorteado];
+
       // 🎉 FIM DA SIMULAÇÃO: Agenda o retorno ao modo oficial padrão (Amanhã às 19:00h com R$ 500)
       const normalSchedule = getNextDrawSchedule();
       const returnToNormalRecord = {
@@ -445,12 +486,24 @@ export class ServerDrawService {
         bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
       } else if (isSunday && bilhetes.length > 0) {
         // 🌟 REGRA DO DOMINGO: A roleta gira exclusivamente entre os bilhetes comprados até sair vencedor garantido
-        const sorteado = bilhetes[Math.floor(Math.random() * bilhetes.length)];
+        const sorteado = bilhetes[Math.floor(rng() * bilhetes.length)];
         milharSorteado = sorteado.numero_milhar;
         bilheteGanhador = sorteado;
+
+        // Gera os 3 giros dummy centralizados para domingo
+        const soldNumbers = new Set(bilhetes.map(b => b.numero_milhar));
+        soldNumbers.add(milharSorteado);
+        const dummySpins: string[] = [];
+        while (dummySpins.length < 3) {
+          const dummy = String(Math.floor(rng() * 10000)).padStart(4, '0');
+          if (!soldNumbers.has(dummy) && !dummySpins.includes(dummy)) {
+            dummySpins.push(dummy);
+          }
+        }
+        girosDomingo = [...dummySpins, milharSorteado];
       } else {
-        // Sorteio diário padrão: 0000 a 9999
-        const randInt = Math.floor(Math.random() * 10000);
+        // Sorteio diário padrão (Segunda a Sábado): 0000 a 9999
+        const randInt = Math.floor(rng() * 10000);
         milharSorteado = String(randInt).padStart(4, '0');
         bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
       }
@@ -567,6 +620,7 @@ export class ServerDrawService {
       sorteio: finalizedDraw,
       ganhador: ganhadorUsuario,
       mensagensGeradas,
+      girosDomingo,
       timestamp: Date.now()
     };
 
@@ -574,7 +628,92 @@ export class ServerDrawService {
       sorteio: finalizedDraw,
       milhar: milharSorteado,
       ganhador: ganhadorUsuario,
-      mensagensGeradas
+      mensagensGeradas,
+      girosDomingo
+    };
+  }
+
+  /**
+   * Retorna o último sorteio finalizado para exibição pública na página inicial,
+   * respeitando a regra do cliente de apagar os dados toda Segunda-feira às 10h da manhã.
+   */
+  static async getLastFinishedDraw(): Promise<{
+    drawId: string;
+    dataSorteio: string;
+    milhar: string;
+    premio: number;
+    acumulou: boolean;
+    ganhadorPrimeiroNome?: string;
+    ganhadorTelefoneFinal?: string;
+    isVisible: boolean;
+  } | null> {
+    let lastDraw: Sorteio | null = null;
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('sorteios')
+          .select('*, ganhador:usuarios(*)')
+          .eq('status', 'finalizado')
+          .not('numeros_sorteados', 'is', null)
+          .order('data_sorteio', { ascending: false })
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          lastDraw = data[0] as Sorteio;
+        }
+      } catch (e) {
+        console.warn('Erro ao buscar último sorteio no Supabase:', e);
+      }
+    }
+
+    if (!lastDraw) {
+      const local = readLocalDbFallback();
+      const finished = (local.sorteios || [])
+        .filter((s: Sorteio) => s.status === 'finalizado' && s.numeros_sorteados)
+        .sort((a: Sorteio, b: Sorteio) => new Date(b.data_sorteio).getTime() - new Date(a.data_sorteio).getTime());
+      if (finished.length > 0) {
+        lastDraw = finished[0];
+      }
+    }
+
+    if (!lastDraw || !lastDraw.numeros_sorteados) {
+      return null;
+    }
+
+    // Regra do cliente: Apagar toda segunda-feira às 10:00h da manhã
+    const isVisible = shouldShowLastDrawResult(lastDraw.data_sorteio);
+    if (!isVisible) {
+      return null;
+    }
+
+    let primeiroNome = '';
+    let telefoneFinal = '';
+
+    if (lastDraw.ganhador) {
+      primeiroNome = lastDraw.ganhador.nome_completo.trim().split(' ')[0];
+      const digits = (lastDraw.ganhador.whatsapp || '').replace(/\D/g, '');
+      telefoneFinal = digits.slice(-4);
+    } else if (lastDraw.ganhador_id && isSupabaseConfigured && supabase) {
+      try {
+        const { data: u } = await supabase.from('usuarios').select('*').eq('id', lastDraw.ganhador_id).maybeSingle();
+        if (u) {
+          primeiroNome = u.nome_completo.trim().split(' ')[0];
+          const digits = (u.whatsapp || '').replace(/\D/g, '');
+          telefoneFinal = digits.slice(-4);
+        }
+      } catch {}
+    }
+
+    return {
+      drawId: lastDraw.id,
+      dataSorteio: lastDraw.data_sorteio,
+      milhar: lastDraw.numeros_sorteados,
+      premio: lastDraw.premio,
+      acumulou: lastDraw.acumulado,
+      ganhadorPrimeiroNome: primeiroNome || undefined,
+      ganhadorTelefoneFinal: telefoneFinal || undefined,
+      isVisible: true
     };
   }
 

@@ -175,11 +175,8 @@ export default function AdminPage() {
         return;
       }
     } catch (e) {
-      console.error(e);
+      console.error('Erro ao executar sorteio pelo admin:', e);
     }
-
-    const result = await AppStore.executeDraw(options);
-    setSorteio(result.sorteio);
     await loadDashboardData();
   };
 

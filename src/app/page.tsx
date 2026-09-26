@@ -9,6 +9,7 @@ import { PixCheckoutModal } from '@/components/PixCheckoutModal';
 import { DrawLiveArena } from '@/components/DrawLiveArena';
 import { MyTicketsModal } from '@/components/MyTicketsModal';
 import { RulesModal } from '@/components/RulesModal';
+import { LastDrawResultCard, LastDrawInfo } from '@/components/LastDrawResultCard';
 import { AppStore } from '@/lib/storage';
 import { Bilhete, Sorteio, Usuario } from '@/types';
 import { 
@@ -22,6 +23,7 @@ export default function Home() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [bilhetes, setBilhetes] = useState<Bilhete[]>([]);
   const [sorteio, setSorteio] = useState<Sorteio | null>(null);
+  const [lastFinishedDraw, setLastFinishedDraw] = useState<LastDrawInfo | null>(null);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [testMode, setTestMode] = useState<boolean>(false);
 
@@ -61,6 +63,9 @@ export default function Home() {
         if (data.schedule) {
           setTargetTimestamp(data.schedule.targetTimestamp);
           setTargetLabel(data.schedule.label);
+        }
+        if ('lastFinishedDraw' in data) {
+          setLastFinishedDraw(data.lastFinishedDraw);
         }
       }
 
@@ -161,7 +166,8 @@ export default function Home() {
             sorteio: data.sorteio,
             milhar: data.milhar,
             ganhador: data.ganhador,
-            mensagensGeradas: data.mensagensGeradas || []
+            mensagensGeradas: data.mensagensGeradas || [],
+            girosDomingo: data.girosDomingo || undefined
           };
         }
       }
@@ -169,10 +175,15 @@ export default function Home() {
       console.error('Erro ao executar sorteio no servidor:', err);
     }
 
-    // Fallback de emergência caso a rede caia
-    const localResult = await AppStore.executeDraw(options);
-    loadData();
-    return localResult;
+    // Fallback: recarrega dados oficiais sem inventar números aleatórios locais
+    await loadData();
+    const fallbackDraw = sorteio || AppStore.getSorteio();
+    return {
+      sorteio: fallbackDraw,
+      milhar: fallbackDraw.numeros_sorteados || '0000',
+      ganhador: fallbackDraw.ganhador || null,
+      mensagensGeradas: []
+    };
   };
 
   // Inicia um novo ciclo de sorteio
@@ -221,7 +232,7 @@ export default function Home() {
       />
 
       {/* Conteúdo Principal */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3">
         
         {/* Banner do Prêmio & Contador Regressivo Sincronizado */}
         <JackpotBanner
@@ -239,6 +250,9 @@ export default function Home() {
             setIsLiveDrawOpen(true);
           }}
         />
+
+        {/* Resultado do Último Sorteio (Salvo até Segunda-feira às 10:00h) */}
+        <LastDrawResultCard lastDraw={lastFinishedDraw} />
 
         {/* Tabela de 10.000 Milhares (0000 a 9999) */}
         <TicketGrid

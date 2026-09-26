@@ -738,6 +738,7 @@ export class ServerDrawService {
     if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
+        await supabase.from('sorteios').delete().neq('id', 'keep_none');
         await supabase.from('sorteios').insert([newDraw]);
       } catch (e) {
         console.warn('Erro ao iniciar novo ciclo no Supabase:', e);
@@ -746,7 +747,7 @@ export class ServerDrawService {
 
     const local = readLocalDbFallback();
     local.bilhetes = [];
-    local.sorteios.push(newDraw);
+    local.sorteios = [newDraw];
     writeLocalDbFallback(local);
 
     return newDraw;

@@ -25,7 +25,8 @@ import {
   LogOut,
   ChevronRight,
   Crown,
-  Play
+  Play,
+  X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Usuario, Bilhete, Sorteio, Mensagem } from '@/types';
@@ -42,8 +43,8 @@ export default function AdminPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
 
-  // Aba ativa: 'overview' | 'participants' | 'draw' | 'whatsapp' | 'database'
-  const [activeTab, setActiveTab] = useState<'overview' | 'participants' | 'draw' | 'whatsapp' | 'database'>('overview');
+  // Aba ativa: 'overview' | 'tickets' | 'participants' | 'draw' | 'whatsapp' | 'database'
+  const [activeTab, setActiveTab] = useState<'overview' | 'tickets' | 'participants' | 'draw' | 'whatsapp' | 'database'>('overview');
 
   // Dados do sistema
   const [participants, setParticipants] = useState<(Usuario & { total_bilhetes?: number })[]>([]);
@@ -52,8 +53,9 @@ export default function AdminPage() {
   const [messages, setMessages] = useState<Mensagem[]>([]);
   const [loadingData, setLoadingData] = useState(false);
 
-  // Filtro de participantes
+  // Filtros de busca
   const [searchTerm, setSearchTerm] = useState('');
+  const [ticketSearchTerm, setTicketSearchTerm] = useState('');
 
   // Estados de feedback de ações
   const [broadcastStatus, setBroadcastStatus] = useState('');
@@ -310,6 +312,16 @@ export default function AdminPage() {
     p.whatsapp.includes(searchTerm)
   );
 
+  const filteredTickets = tickets.filter(ticket => {
+    const owner = ticket.usuario || participants.find(p => p.id === ticket.usuario_id);
+    const nome = owner?.nome_completo?.toLowerCase() || '';
+    const wa = owner?.whatsapp?.toLowerCase() || '';
+    const num = ticket.numero_milhar || '';
+    const term = ticketSearchTerm.toLowerCase().trim();
+    if (!term) return true;
+    return nome.includes(term) || wa.includes(term) || num.includes(term);
+  });
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       
@@ -372,6 +384,18 @@ export default function AdminPage() {
           </button>
 
           <button
+            onClick={() => setActiveTab('tickets')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ${
+              activeTab === 'tickets'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white'
+            }`}
+          >
+            <Ticket className="w-4 h-4 text-emerald-400" />
+            <span>Bilhetes Vendidos ({tickets.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('participants')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ${
               activeTab === 'participants'
@@ -428,15 +452,29 @@ export default function AdminPage() {
             
             {/* Cards de Métricas */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-                <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                  <Ticket className="w-4 h-4 text-emerald-400" />
-                  <span>Bilhetes Vendidos</span>
+              <button
+                type="button"
+                onClick={() => setActiveTab('tickets')}
+                className="bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-5 text-left transition-all group cursor-pointer shadow-md hover:shadow-emerald-950/40 relative overflow-hidden"
+                title="Clique para ver a tabela com Nome, WhatsApp e Milhar de todos os bilhetes vendidos"
+              >
+                <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                  <div className="flex items-center gap-2">
+                    <Ticket className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+                    <span className="font-bold text-slate-300 group-hover:text-emerald-300">Bilhetes Vendidos</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 group-hover:bg-emerald-500/20 flex items-center gap-0.5">
+                    <span>Ver Tabela</span>
+                    <ChevronRight className="w-3 h-3" />
+                  </span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-white font-mono">
+                <div className="text-2xl sm:text-3xl font-black text-white font-mono mt-1">
                   {tickets.length} <span className="text-xs text-slate-500 font-sans">/ 10.000</span>
                 </div>
-              </div>
+                <p className="text-[11px] text-emerald-400/80 font-medium mt-1.5 flex items-center gap-1 group-hover:text-emerald-300">
+                  <span>Abrir lista com Nome, WhatsApp e Milhar →</span>
+                </p>
+              </button>
 
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                 <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
@@ -498,7 +536,175 @@ export default function AdminPage() {
         )}
 
         {/* ==========================================
-            ABA 2: PARTICIPANTES & LEADS (CAPTURA DO MODAL)
+            ABA 2: BILHETES VENDIDOS (TABELA OFICIAL)
+        ========================================== */}
+        {activeTab === 'tickets' && (
+          <div className="space-y-4 animate-in fade-in duration-200">
+            
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-black text-white">
+                    Tabela de Bilhetes Vendidos ({filteredTickets.length})
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30 font-mono">
+                    Total: {(tickets.length * 2.0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Lista completa de todas as milhares vendidas com Nome do Participante, WhatsApp e Número do Bilhete.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-72">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por milhar, nome ou WhatsApp"
+                    value={ticketSearchTerm}
+                    onChange={(e) => setTicketSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-8 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                  />
+                  {ticketSearchTerm && (
+                    <button
+                      onClick={() => setTicketSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-1"
+                      title="Limpar busca"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={loadDashboardData}
+                  disabled={loadingData}
+                  className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  title="Atualizar lista de bilhetes"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingData ? 'animate-spin text-emerald-400' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Tabela de Bilhetes Vendidos */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950/80 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="p-3.5 text-center">Nº do Bilhete</th>
+                      <th className="p-3.5">Nome do Participante</th>
+                      <th className="p-3.5">WhatsApp</th>
+                      <th className="p-3.5">Data / Hora</th>
+                      <th className="p-3.5 text-center">Valor</th>
+                      <th className="p-3.5 text-center">Status Pagamento</th>
+                      <th className="p-3.5 text-right">Contato</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {filteredTickets.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-500">
+                          {ticketSearchTerm 
+                            ? 'Nenhum bilhete encontrado para o filtro pesquisado.' 
+                            : 'Nenhum bilhete vendido registrado para o sorteio atual.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredTickets.map((bilhete) => {
+                        const owner = bilhete.usuario || participants.find(p => p.id === bilhete.usuario_id);
+                        const nome = owner?.nome_completo || 'Cliente Tá Na Mão';
+                        const wa = owner?.whatsapp || '';
+                        const waFormatted = wa ? maskPhoneNumber(wa) : '-';
+                        const waLink = wa ? generateWhatsAppWebLink(
+                          wa,
+                          `Olá ${nome.split(' ')[0]}, confirmamos a sua milhar ${bilhete.numero_milhar} no sorteio do Tá Na Mão da SORTE! Boa sorte! 🍀`
+                        ) : null;
+
+                        const isWinner = sorteio?.status === 'finalizado' && sorteio.numeros_sorteados === bilhete.numero_milhar;
+
+                        return (
+                          <tr key={bilhete.id} className="hover:bg-slate-800/40 transition-colors">
+                            {/* Número do Bilhete */}
+                            <td className="p-3.5 text-center">
+                              <span className="inline-flex px-3 py-1 rounded-xl bg-slate-950 border border-emerald-500/40 font-mono font-black text-sm text-amber-400 shadow-sm">
+                                {bilhete.numero_milhar}
+                              </span>
+                            </td>
+
+                            {/* Nome Completo */}
+                            <td className="p-3.5 font-bold text-white">
+                              <div className="flex items-center gap-1.5">
+                                <span>{nome}</span>
+                                {isWinner && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-400 text-slate-950">
+                                    GANHADOR
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* WhatsApp */}
+                            <td className="p-3.5 font-mono text-emerald-400 font-semibold">
+                              {waFormatted}
+                            </td>
+
+                            {/* Data / Hora */}
+                            <td className="p-3.5 text-slate-400">
+                              {bilhete.data_compra ? (
+                                <>
+                                  {new Date(bilhete.data_compra).toLocaleDateString('pt-BR')} às{' '}
+                                  {new Date(bilhete.data_compra).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                </>
+                              ) : '-'}
+                            </td>
+
+                            {/* Valor */}
+                            <td className="p-3.5 text-center font-bold text-slate-300">
+                              R$ {(bilhete.valor || 2.0).toFixed(2)}
+                            </td>
+
+                            {/* Status Pagamento */}
+                            <td className="p-3.5 text-center">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                <span>Pix Aprovado</span>
+                              </span>
+                            </td>
+
+                            {/* Ação WhatsApp */}
+                            <td className="p-3.5 text-right">
+                              {waLink ? (
+                                <a
+                                  href={waLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-300 border border-green-500/30 font-bold text-[11px]"
+                                  title={`Conversar com ${nome} no WhatsApp`}
+                                >
+                                  <span>WhatsApp</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              ) : (
+                                <span className="text-slate-600">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ==========================================
+            ABA 3: PARTICIPANTES & LEADS (CAPTURA DO MODAL)
         ========================================== */}
         {activeTab === 'participants' && (
           <div className="space-y-4 animate-in fade-in duration-200">

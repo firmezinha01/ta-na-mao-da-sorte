@@ -130,47 +130,49 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
     const drawResult = await onExecuteDraw(options);
     const isSunday = options?.isSunday ?? sorteio.eh_domingo ?? false;
 
-    // 🌟 REGRA ESPECIAL DE DOMINGO:
-    // Se for domingo e houver bilhetes comprados, a roleta mostra o primeiro giro sem ganhador
-    // e exibe a mensagem "Não houve ganhador, vamos girar novamente" antes de premiar o vencedor!
+    // 🌟 REGRA ESPECIAL DE DOMINGO (4 GIROS NA TELA):
+    // Giros 1, 2 e 3: Não houve ganhador nesta rodada, vamos girar novamente!
+    // Giro 4: Cai na milhar vencedora, toca fanfarra, envia WhatsApp e libera o prêmio!
     if (isSunday && drawResult.ganhador) {
-      // 1. Gera um número aleatório dummy que NÃO foi comprado por ninguém
       const soldNumbers = new Set(soldTickets.map(b => b.numero_milhar));
-      let dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-      let attempts = 0;
-      while (soldNumbers.has(dummyNumber) && attempts < 20) {
-        dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-        attempts++;
+      soldNumbers.add(drawResult.milhar);
+
+      // Executa os 3 primeiros giros sem ganhador
+      for (let round = 1; round <= 3; round++) {
+        let dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        while (soldNumbers.has(dummyNumber)) {
+          dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        }
+
+        // Gira os 4 tambores até o número dummy
+        await spinDrumsToTarget(dummyNumber);
+
+        // Som de alerta e banner de aviso
+        sounds.playAccumulatedBell();
+        setSundayRetryNotice(`Milhar ${dummyNumber} não foi comprada! Não houve ganhador na ${round}ª rodada.`);
+        setSundayCountdown(3);
+
+        // Contagem regressiva de 3 segundos
+        await new Promise<void>((resolve) => {
+          let count = 3;
+          const interval = setInterval(() => {
+            count--;
+            setSundayCountdown(count);
+            sounds.playRollTick();
+            if (count <= 0) {
+              clearInterval(interval);
+              resolve();
+            }
+          }, 1000);
+        });
+
+        setSundayRetryNotice(null);
       }
 
-      // Primeiro giro dramático
-      await spinDrumsToTarget(dummyNumber);
-
-      // Alerta de que não houve ganhador nesta rodada
-      sounds.playAccumulatedBell();
-      setSundayRetryNotice(`Milhar ${dummyNumber} não foi comprada!`);
-      setSundayCountdown(3);
-
-      // Contagem regressiva de 3 segundos
-      await new Promise<void>((resolve) => {
-        let count = 3;
-        const interval = setInterval(() => {
-          count--;
-          setSundayCountdown(count);
-          sounds.playRollTick();
-          if (count <= 0) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, 1000);
-      });
-
-      setSundayRetryNotice(null);
-
-      // Segundo giro: gira e cai no vencedor oficial garantido!
+      // 4º Giro Triunfal: Gira e cai na milhar vencedora garantida!
       await spinDrumsToTarget(drawResult.milhar);
     } else {
-      // Sorteio diário padrão: gira uma única vez
+      // Sorteio diário padrão (Segunda a Sábado): gira uma única vez
       await spinDrumsToTarget(drawResult.milhar);
     }
 

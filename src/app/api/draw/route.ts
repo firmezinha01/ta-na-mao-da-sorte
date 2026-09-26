@@ -11,12 +11,39 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const serverTime = Date.now();
-    const schedule = getNextDrawSchedule();
+    let schedule = getNextDrawSchedule();
     const [draw, tickets] = await Promise.all([
       ServerDrawService.getCurrentOrScheduledDraw(),
       ServerDrawService.getConfirmedTickets()
     ]);
     const isCutoff = isSalesCutoffActive();
+
+    // Se estiver em modo de Simulação dos 7 dias (Segunda a Domingo a cada 5 min)
+    if (draw.id.startsWith('sorteio_simulacao_etapa_')) {
+      const stepMatch = draw.id.match(/sorteio_simulacao_etapa_(\d+)/);
+      const step = stepMatch ? parseInt(stepMatch[1], 10) : 1;
+      const dayNames = [
+        '',
+        'Segunda-feira (Sorteio 1/7)',
+        'Terça-feira (Sorteio 2/7)',
+        'Quarta-feira (Sorteio 3/7)',
+        'Quinta-feira (Sorteio 4/7)',
+        'Sexta-feira (Sorteio 5/7)',
+        'Sábado (Sorteio 6/7)',
+        '🌟 DOMINGO DA SORTE (Sorteio 7/7)'
+      ];
+      const targetDate = new Date(draw.data_sorteio);
+      const targetH = String(targetDate.getHours()).padStart(2, '0');
+      const targetM = String(targetDate.getMinutes()).padStart(2, '0');
+
+      schedule = {
+        targetTimestamp: targetDate.getTime(),
+        targetIso: draw.data_sorteio,
+        label: `${targetH}:${targetM}h • ${dayNames[step] || `Etapa ${step}/7`}`,
+        isSunday: step === 7,
+        isTestMode: true
+      };
+    }
 
     return NextResponse.json({
       serverTime,
@@ -34,12 +61,16 @@ export async function GET() {
 /**
  * POST /api/draw
  * Executa o sorteio de forma centralizada e 100% atômica no servidor.
- * Retorna exatamente o mesmo resultado para computador, celular e qualquer dispositivo.
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { action, drawId, forcedWinnerMilhar, isSunday } = body;
+    const { action, drawId, forcedWinnerMilhar, isSunday, delayMinutes } = body;
+
+    if (action === 'start_week_simulation') {
+      const step1 = await ServerDrawService.startWeekSimulation(delayMinutes || 5);
+      return NextResponse.json({ success: true, draw: step1 });
+    }
 
     if (action === 'new_cycle') {
       const newDraw = await ServerDrawService.startNewCycle();

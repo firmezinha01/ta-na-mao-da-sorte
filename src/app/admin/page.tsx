@@ -197,6 +197,23 @@ export default function AdminPage() {
     await loadDashboardData();
   };
 
+  // Iniciar Simulação da Semana Completa (7 Sorteios a cada 5 min)
+  const handleStartWeekSimulation = async () => {
+    try {
+      const res = await fetch('/api/draw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start_week_simulation', delayMinutes: 5 })
+      });
+      if (res.ok) {
+        alert('Simulação dos 7 sorteios iniciada com sucesso! O primeiro sorteio começará em 5 minutos.');
+        await loadDashboardData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // ==========================================
   // TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
   // ==========================================
@@ -648,6 +665,19 @@ export default function AdminPage() {
                     Preparar Próximo Ciclo de Sorteio
                   </button>
                 )}
+              </div>
+
+              {/* Botão de Simulação da Semana Completa (7 Sorteios a cada 5 min) */}
+              <div className="mt-6 pt-6 border-t border-slate-800 text-center">
+                <button
+                  onClick={handleStartWeekSimulation}
+                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-extrabold text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 mx-auto transition-all active:scale-95"
+                >
+                  <span>🚀 Iniciar Simulação da Semana Completa (7 Sorteios a cada 5 min)</span>
+                </button>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Executa Segunda a Sábado acumulando +R$ 500 por etapa e Domingo da Sorte girando 4 vezes e liberando o prêmio!
+                </p>
               </div>
             </div>
 

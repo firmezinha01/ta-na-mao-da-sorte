@@ -40,7 +40,7 @@ export class ServerDrawService {
   private static inFlightExecution: Promise<DrawExecutionResult> | null = null;
 
   /**
-   * Cache de memória para sincronização instantânea em tempo real (últimos 90s)
+   * Cache de memória para sincronização instantânea em tempo real (últimos 60s)
    */
   private static lastExecution: {
     drawId: string;
@@ -50,6 +50,51 @@ export class ServerDrawService {
     mensagensGeradas: Mensagem[];
     timestamp: number;
   } | null = null;
+
+  /**
+   * Inicia a Simulação da Semana Completa (7 Sorteios a cada 5 minutos):
+   * - Etapas 1 a 6 (Segunda a Sábado): NÃO sai ganhador -> Prêmio acumula +R$ 500 por etapa até R$ 3.500.
+   * - Etapa 7 (Domingo da Sorte): Roda 4 vezes na tela, sai ganhador garantido e libera o prêmio!
+   * - Após a etapa 7: Encerra o teste e retorna automaticamente ao horário oficial normal (às 19:00h com R$ 500).
+   */
+  static async startWeekSimulation(firstStepDelayMinutes: number = 5): Promise<Sorteio> {
+    this.lastExecution = null;
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('sorteios').delete().neq('id', 'keep_none');
+      } catch (e) {
+        console.warn('Erro ao limpar sorteios anteriores:', e);
+      }
+    }
+
+    const firstTarget = new Date(Date.now() + firstStepDelayMinutes * 60 * 1000);
+
+    const step1Draw: Sorteio = {
+      id: 'sorteio_simulacao_etapa_1',
+      data_sorteio: firstTarget.toISOString(),
+      numeros_sorteados: null,
+      ganhador_id: null,
+      premio: 500,
+      acumulado: false,
+      status: 'agendado',
+      eh_domingo: false
+    };
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('sorteios').insert([step1Draw]);
+      } catch (e) {
+        console.warn('Erro ao inserir Etapa 1 no Supabase:', e);
+      }
+    }
+
+    const local = readLocalDbFallback();
+    local.sorteios = [step1Draw];
+    writeLocalDbFallback(local);
+
+    return step1Draw;
+  }
 
   /**
    * Retorna o sorteio ativo agendado na nuvem (Supabase).
@@ -104,7 +149,7 @@ export class ServerDrawService {
           }
         }
 
-        // 3. Cria um novo sorteio agendado na nuvem com ID único
+        // 3. Cria um novo sorteio agendado na nuvem
         const newDrawId = `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const newDrawRecord = {
           id: newDrawId,
@@ -176,8 +221,6 @@ export class ServerDrawService {
 
   /**
    * Executa o sorteio centralizado no Servidor de forma 100% ATÔMICA e IDEMPOTENTE.
-   * Se múltiplos dispositivos chamarem ao mesmo tempo, um Mutex garante que
-   * todos compartilham a MESMA execução e recebem o MESMO número sorteado.
    */
   static async executeOfficialDraw(options?: {
     drawId?: string;
@@ -207,8 +250,8 @@ export class ServerDrawService {
     const now = Date.now();
 
     // 1. SINCRONIZAÇÃO EM TEMPO REAL:
-    // Se houve sorteio executado nos últimos 90 segundos, todos os dispositivos recebem EXATAMENTE o mesmo!
-    if (this.lastExecution && (now - this.lastExecution.timestamp < 90000)) {
+    // Se houve sorteio executado nos últimos 60 segundos, todos os dispositivos recebem EXATAMENTE o mesmo!
+    if (this.lastExecution && (now - this.lastExecution.timestamp < 60000)) {
       if (!options?.drawId || options.drawId === this.lastExecution.drawId) {
         return {
           sorteio: this.lastExecution.sorteio,
@@ -274,53 +317,35 @@ export class ServerDrawService {
     const bilhetes = await this.getConfirmedTickets();
     const isSunday = options?.isSunday ?? targetDraw.eh_domingo ?? false;
 
+    // Verifica se este sorteio faz parte da Simulação dos 7 dias
+    const isSimulacao = targetDraw.id.startsWith('sorteio_simulacao_etapa_');
+    const stepMatch = targetDraw.id.match(/sorteio_simulacao_etapa_(\d+)/);
+    const stepNum = stepMatch ? parseInt(stepMatch[1], 10) : 0;
+
     let milharSorteado = '';
     let bilheteGanhador: Bilhete | undefined;
-
-    // 6. Regra de Sorteio
-    if (options?.forcedWinnerMilhar) {
-      milharSorteado = options.forcedWinnerMilhar;
-      bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
-    } else if (isSunday && bilhetes.length > 0) {
-      // 🌟 REGRA DO DOMINGO: A roleta gira exclusivamente entre os bilhetes comprados até sair vencedor garantido
-      const sorteado = bilhetes[Math.floor(Math.random() * bilhetes.length)];
-      milharSorteado = sorteado.numero_milhar;
-      bilheteGanhador = sorteado;
-    } else {
-      // Sorteio diário padrão: 0000 a 9999
-      const randInt = Math.floor(Math.random() * 10000);
-      milharSorteado = String(randInt).padStart(4, '0');
-      bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
-    }
-
-    // 7. Determina se houve ganhador e atualiza prêmio
     let ganhadorUsuario: Usuario | null = null;
     let foiAcumulado = false;
     let novoPremio = 500;
 
-    if (bilheteGanhador) {
-      // HOUVE GANHADOR
-      foiAcumulado = false;
-      novoPremio = 500; // Reseta prêmio para o próximo ciclo
-
-      // Busca dados do ganhador
-      if (bilheteGanhador.usuario) {
-        ganhadorUsuario = bilheteGanhador.usuario;
-      } else if (bilheteGanhador.usuario_id && isSupabaseConfigured && supabase) {
-        const { data: u } = await supabase
-          .from('usuarios')
-          .select('*')
-          .eq('id', bilheteGanhador.usuario_id)
-          .maybeSingle();
-        ganhadorUsuario = u || null;
+    // =========================================================================
+    // CASO A: SIMULAÇÃO DA SEMANA (ETAPAS 1 A 7)
+    // =========================================================================
+    if (isSimulacao && stepNum >= 1 && stepNum <= 6) {
+      // 🌟 ETAPAS 1 A 6 (Segunda a Sábado): NÃO SAI GANHADOR! Acumula R$ 500 por etapa
+      const soldSet = new Set(bilhetes.map(b => b.numero_milhar));
+      let rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      while (soldSet.has(rand)) {
+        rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
       }
-    } else {
-      // NÃO HOUVE GANHADOR -> ACUMULOU!
-      foiAcumulado = true;
-      novoPremio = targetDraw.premio + 500; // Acumula R$ 500 para a próxima rodada
 
-      // 🧹 REGRA DO CLIENTE:
-      // "caso seja feito o sorteio e não tenha ganhador tem que zerar os bilhetes que estavam compado no sistema e apartir do sorteio vai começar a nova venda"
+      milharSorteado = rand;
+      bilheteGanhador = undefined;
+      ganhadorUsuario = null;
+      foiAcumulado = true;
+      novoPremio = targetDraw.premio + 500;
+
+      // Zera bilhetes anteriores para a próxima rodada de vendas
       if (isSupabaseConfigured && supabase) {
         try {
           await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
@@ -328,12 +353,157 @@ export class ServerDrawService {
           console.warn('Erro ao zerar bilhetes no Supabase:', e);
         }
       }
-      const local = readLocalDbFallback();
-      local.bilhetes = [];
-      writeLocalDbFallback(local);
+
+      // Agenda a próxima etapa para daqui a 5 minutos
+      const nextStepTarget = new Date(Date.now() + 5 * 60 * 1000);
+      const isNextSunday = (stepNum + 1 === 7);
+      const nextStepRecord = {
+        id: `sorteio_simulacao_etapa_${stepNum + 1}`,
+        data_sorteio: nextStepTarget.toISOString(),
+        numeros_sorteados: null,
+        ganhador_id: null,
+        premio: novoPremio,
+        acumulado: true,
+        status: 'agendado',
+        eh_domingo: isNextSunday
+      };
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('sorteios').insert([nextStepRecord]);
+        } catch (e) {
+          console.warn('Erro ao agendar próxima etapa no Supabase:', e);
+        }
+      }
+    } else if (isSimulacao && stepNum === 7) {
+      // 🌟 ETAPA 7 (DOMINGO DA SORTE): SAI GANHADOR GARANTIDO E LIBERA O PRÊMIO!
+      let winningTicket = bilhetes.length > 0 ? bilhetes[0] : undefined;
+
+      // Se nenhum bilhete foi comprado, seleciona o participante cadastrado no Supabase
+      if (!winningTicket) {
+        let candidateUser: Usuario | null = null;
+        if (isSupabaseConfigured && supabase) {
+          const { data: users } = await supabase.from('usuarios').select('*').limit(1);
+          if (users && users.length > 0) {
+            candidateUser = users[0] as Usuario;
+          }
+        }
+        if (!candidateUser) {
+          candidateUser = {
+            id: 'usr_flavio_oficial',
+            nome_completo: 'Flavio Participante Oficial',
+            cpf: '01234567890',
+            whatsapp: '11987654321',
+            data_cadastro: new Date().toISOString()
+          };
+        }
+
+        winningTicket = {
+          id: 'bilhete_oficial_ganhador_domingo',
+          numero_milhar: '7777',
+          usuario_id: candidateUser.id,
+          sorteio_id: targetDraw.id,
+          data_compra: new Date().toISOString(),
+          status_pagamento: true,
+          valor: 2.00,
+          usuario: candidateUser
+        };
+      }
+
+      milharSorteado = winningTicket.numero_milhar;
+      bilheteGanhador = winningTicket;
+      ganhadorUsuario = winningTicket.usuario || null;
+      foiAcumulado = false;
+      novoPremio = 500;
+
+      // 🎉 FIM DA SIMULAÇÃO: Agenda o retorno ao modo oficial padrão (Amanhã às 19:00h com R$ 500)
+      const normalSchedule = getNextDrawSchedule();
+      const returnToNormalRecord = {
+        id: 'sorteio_oficial_diario',
+        data_sorteio: normalSchedule.targetIso,
+        numeros_sorteados: null,
+        ganhador_id: null,
+        premio: 500,
+        acumulado: false,
+        status: 'agendado',
+        eh_domingo: false
+      };
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('sorteios').insert([returnToNormalRecord]);
+        } catch (e) {
+          console.warn('Erro ao retornar ao sorteio normal no Supabase:', e);
+        }
+      }
+    } else {
+      // =========================================================================
+      // CASO B: OPERAÇÃO PADRÃO DIÁRIA (PRODUÇÃO)
+      // =========================================================================
+      if (options?.forcedWinnerMilhar) {
+        milharSorteado = options.forcedWinnerMilhar;
+        bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
+      } else if (isSunday && bilhetes.length > 0) {
+        // 🌟 REGRA DO DOMINGO: A roleta gira exclusivamente entre os bilhetes comprados até sair vencedor garantido
+        const sorteado = bilhetes[Math.floor(Math.random() * bilhetes.length)];
+        milharSorteado = sorteado.numero_milhar;
+        bilheteGanhador = sorteado;
+      } else {
+        // Sorteio diário padrão: 0000 a 9999
+        const randInt = Math.floor(Math.random() * 10000);
+        milharSorteado = String(randInt).padStart(4, '0');
+        bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
+      }
+
+      if (bilheteGanhador) {
+        foiAcumulado = false;
+        novoPremio = 500;
+        if (bilheteGanhador.usuario) {
+          ganhadorUsuario = bilheteGanhador.usuario;
+        } else if (bilheteGanhador.usuario_id && isSupabaseConfigured && supabase) {
+          const { data: u } = await supabase.from('usuarios').select('*').eq('id', bilheteGanhador.usuario_id).maybeSingle();
+          ganhadorUsuario = u || null;
+        }
+      } else {
+        foiAcumulado = true;
+        novoPremio = targetDraw.premio + 500;
+
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
+          } catch (e) {
+            console.warn('Erro ao zerar bilhetes no Supabase:', e);
+          }
+        }
+        const local = readLocalDbFallback();
+        local.bilhetes = [];
+        writeLocalDbFallback(local);
+      }
+
+      // Agenda a próxima rodada oficial para amanhã às 19:00h
+      const nextSchedule = getNextDrawSchedule(new Date(Date.now() + 60000));
+      const nextId = `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('sorteios').insert([
+            {
+              id: nextId,
+              data_sorteio: nextSchedule.targetIso,
+              numeros_sorteados: null,
+              ganhador_id: null,
+              premio: novoPremio,
+              acumulado: foiAcumulado,
+              status: 'agendado',
+              eh_domingo: nextSchedule.isSunday
+            }
+          ]);
+        } catch (err) {
+          console.warn('Erro ao atualizar sorteio no Supabase:', err);
+        }
+      }
     }
 
-    // 8. Atualiza o sorteio no Supabase marcando como finalizado
+    // 8. Atualiza o sorteio atual no Supabase marcando como finalizado
     const finalizedDraw: Sorteio = {
       ...targetDraw,
       numeros_sorteados: milharSorteado,
@@ -354,24 +524,8 @@ export class ServerDrawService {
             acumulado: foiAcumulado
           })
           .eq('id', targetDraw.id);
-
-        // Agenda imediatamente a próxima rodada no Supabase
-        const nextSchedule = getNextDrawSchedule(new Date(Date.now() + 60000));
-        const nextId = `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        await supabase.from('sorteios').insert([
-          {
-            id: nextId,
-            data_sorteio: nextSchedule.targetIso,
-            numeros_sorteados: null,
-            ganhador_id: null,
-            premio: novoPremio,
-            acumulado: foiAcumulado,
-            status: 'agendado',
-            eh_domingo: nextSchedule.isSunday
-          }
-        ]);
       } catch (err) {
-        console.warn('Erro ao atualizar sorteio no Supabase:', err);
+        console.warn('Erro ao finalizar sorteio no Supabase:', err);
       }
     }
 
@@ -385,7 +539,7 @@ export class ServerDrawService {
     }
     writeLocalDbFallback(local);
 
-    // 9. Mensagens de Notificação via WhatsApp
+    // 9. Mensagens de Notificação via WhatsApp para o Ganhador
     const mensagensGeradas: Mensagem[] = [];
     try {
       if (ganhadorUsuario) {

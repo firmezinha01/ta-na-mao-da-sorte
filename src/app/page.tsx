@@ -15,7 +15,8 @@ import { Bilhete, Sorteio, Usuario } from '@/types';
 import { 
   ShieldCheck, 
   Trophy, 
-  Phone
+  Phone,
+  RefreshCw
 } from 'lucide-react';
 
 export default function Home() {
@@ -41,6 +42,12 @@ export default function Home() {
   const [isAutoDrawStart, setIsAutoDrawStart] = useState(false);
   const [isMyTicketsOpen, setIsMyTicketsOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
+
+  // Estados e controle para Pull-to-Refresh (arrastar para baixo e atualizar)
+  const [pullY, setPullY] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const touchStartY = useRef(0);
+  const isPullingRef = useRef(false);
 
   const isInitialLoad = useRef(true);
 
@@ -78,22 +85,6 @@ export default function Home() {
         }
       }
 
-      // Usuário salvo localmente no dispositivo (evita atualizar referência idêntica a cada 4s)
-      const localUser = AppStore.getCurrentUser();
-      if (localUser) {
-        setCurrentUser(prev => {
-          if (!prev) return localUser;
-          if (
-            prev.id === localUser.id &&
-            prev.nome_completo === localUser.nome_completo &&
-            prev.cpf === localUser.cpf &&
-            prev.whatsapp === localUser.whatsapp
-          ) {
-            return prev;
-          }
-          return localUser;
-        });
-      }
       setTestMode(AppStore.isTestMode());
     } catch (err) {
       console.warn('Erro ao carregar dados centralizados:', err);
@@ -102,12 +93,63 @@ export default function Home() {
         setUsuarios(AppStore.getUsuarios());
         setBilhetes(AppStore.getBilhetes());
         setSorteio(AppStore.getSorteio());
-        setCurrentUser(AppStore.getCurrentUser());
       }
     } finally {
       isInitialLoad.current = false;
     }
   }, []);
+
+  // Ao iniciar ou recarregar a tela, zera as informações da sessão do cliente anterior
+  useEffect(() => {
+    AppStore.clearCurrentUser();
+    setCurrentUser(null);
+  }, []);
+
+  // Handlers para o gesto móvel de arrastar para baixo e atualizar (Pull-to-Refresh)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (typeof window !== 'undefined' && window.scrollY <= 5) {
+      touchStartY.current = e.touches[0].clientY;
+      isPullingRef.current = true;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isPullingRef.current) return;
+    if (typeof window !== 'undefined' && window.scrollY > 5) {
+      isPullingRef.current = false;
+      setPullY(0);
+      return;
+    }
+    const currentY = e.touches[0].clientY;
+    const diff = currentY - touchStartY.current;
+    if (diff > 0) {
+      setPullY(Math.min(diff * 0.45, 80));
+    }
+  };
+
+  const handleTouchEnd = async () => {
+    if (!isPullingRef.current) return;
+    isPullingRef.current = false;
+
+    if (pullY > 50) {
+      setIsRefreshing(true);
+      setPullY(55);
+
+      // REGRA OFICIAL: Ao arrastar para baixo para atualizar, zera os dados do cliente anterior!
+      AppStore.clearCurrentUser();
+      setCurrentUser(null);
+      setSelectedNumbers([]);
+
+      await loadData();
+
+      setTimeout(() => {
+        setIsRefreshing(false);
+        setPullY(0);
+      }, 500);
+    } else {
+      setPullY(0);
+    }
+  };
 
   // Montagem e polling leve a cada 4 segundos para manter todos os dispositivos 100% sincronizados
   useEffect(() => {
@@ -150,7 +192,8 @@ export default function Home() {
 
   // Finaliza o pagamento e cadastra os bilhetes
   const handlePaymentComplete = (userData: { nome_completo: string; cpf: string; whatsapp: string }) => {
-    AppStore.purchaseTickets(selectedNumbers, userData);
+    const { user } = AppStore.purchaseTickets(selectedNumbers, userData);
+    setCurrentUser(user);
     loadData();
     setSelectedNumbers([]);
   };
@@ -228,7 +271,30 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+    <div 
+      className="min-h-screen flex flex-col bg-slate-950 text-slate-100"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* Indicador de Pull-to-Refresh ao arrastar para baixo */}
+      {(pullY > 0 || isRefreshing) && (
+        <div 
+          className="fixed top-2 left-0 right-0 z-50 flex items-center justify-center pointer-events-none transition-transform duration-100"
+          style={{ transform: `translateY(${Math.max(pullY - 10, 0)}px)` }}
+        >
+          <div className="bg-slate-900/95 border border-emerald-500/70 shadow-2xl shadow-emerald-950 px-4 py-2 rounded-full flex items-center gap-2 text-xs font-bold text-emerald-400 backdrop-blur-md">
+            <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>
+              {isRefreshing 
+                ? 'Atualizando e zerando dados do cliente...' 
+                : pullY > 50 
+                  ? 'Solte para atualizar e zerar sessão' 
+                  : 'Puxe para baixo para atualizar'}
+            </span>
+          </div>
+        </div>
+      )}
       
       {/* Navegação Superior */}
       <Header

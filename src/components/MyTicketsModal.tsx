@@ -106,21 +106,12 @@ export const MyTicketsModal: React.FC<MyTicketsModalProps> = ({
       prevIsOpenRef.current = true;
       setSearchError('');
 
-      // Se já houver CPF do participante na sessão, consulta uma única vez
-      if (currentUser?.cpf) {
-        const clean = currentUser.cpf.replace(/\D/g, '');
-        if (clean.length === 11) {
-          setCpfInput(formatCpf(clean));
-          executeSearch(clean);
-        }
-      } else {
-        // Sem CPF prévio: deixa pronto para o participante digitar
-        setCpfInput('');
-        setHasSearched(false);
-        setSearchedTickets(null);
-        setSearchedUser(null);
-        lastSearchedCpfRef.current = '';
-      }
+      // Sempre inicia limpo para o participante consultar o CPF que desejar
+      setCpfInput('');
+      setHasSearched(false);
+      setSearchedTickets(null);
+      setSearchedUser(null);
+      lastSearchedCpfRef.current = '';
     } else if (!isOpen) {
       prevIsOpenRef.current = false;
       setIsSearching(false);

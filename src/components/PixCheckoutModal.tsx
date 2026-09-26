@@ -7,7 +7,6 @@ import {
   Check, 
   QrCode, 
   ShieldCheck, 
-  Zap, 
   Clock, 
   PartyPopper,
   Phone,
@@ -44,7 +43,6 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   const [loadingPix, setLoadingPix] = useState(true);
   const [pixError, setPixError] = useState('');
   const [copied, setCopied] = useState(false);
-  const [isProcessingApproval, setIsProcessingApproval] = useState(false);
   const [isCheckingAuto, setIsCheckingAuto] = useState(false);
   const [isSavingParticipant, setIsSavingParticipant] = useState(false);
 
@@ -103,6 +101,10 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
         setNomeCompleto(currentUser.nome_completo || '');
         setCpf(currentUser.cpf || '');
         setWhatsapp(currentUser.whatsapp || '');
+      } else {
+        setNomeCompleto('');
+        setCpf('');
+        setWhatsapp('');
       }
 
       fetchPix();
@@ -232,27 +234,6 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     } catch (e) {
       console.warn('Fallback copy error:', e);
     }
-  };
-
-  // Simula ou força a aprovação (Ambiente de Teste)
-  const handleApprovePayment = () => {
-    setIsProcessingApproval(true);
-    sounds.playDigitLock();
-    setTimeout(() => {
-      setIsProcessingApproval(false);
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      setStep('registration');
-    }, 600);
-  };
-
-  // Avança diretamente para o cadastro dos dados após pagamento via Pix
-  const handleProceedToRegistration = () => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    sounds.playDigitLock();
-    if (pixData?.paymentId) {
-      fetch(`/api/pix/status?paymentId=${pixData.paymentId}&force=true`).catch(() => {});
-    }
-    setStep('registration');
   };
 
   const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -483,23 +464,8 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Botão Principal: Já fiz o Pix • Preencher meus Dados */}
-                  <div className="w-full space-y-2 mb-4">
-                    <button
-                      type="button"
-                      onClick={handleProceedToRegistration}
-                      className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2.5 transform active:scale-95 transition-all cursor-pointer border border-emerald-300/40"
-                    >
-                      <CheckCircle2 className="w-5 h-5 text-slate-950 shrink-0" />
-                      <span>Já fiz o Pix • Preencher meus Dados</span>
-                    </button>
-                    <p className="text-[11px] text-emerald-300/90 text-center font-medium">
-                      Já pagou no app do seu banco? Clique no botão acima para preencher seu Nome, CPF e WhatsApp.
-                    </p>
-                  </div>
-
                   {/* Instruções de Pagamento */}
-                  <div className="w-full bg-slate-950/60 rounded-2xl p-3 border border-slate-800 text-left text-xs text-slate-300 space-y-1.5 mb-4">
+                  <div className="w-full bg-slate-950/60 rounded-2xl p-3 border border-slate-800 text-left text-xs text-slate-300 space-y-1.5 mb-2">
                     <div className="font-bold text-emerald-400 flex items-center gap-1 text-[11px] uppercase tracking-wider">
                       <Smartphone className="w-3.5 h-3.5" />
                       <span>Como Pagar:</span>
@@ -507,23 +473,6 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                     <p className="text-[11px] text-slate-400">1. Abra o app do seu banco (Nubank, Inter, Itaú, Bradesco, etc.).</p>
                     <p className="text-[11px] text-slate-400">2. Escolha <strong>Área Pix &gt; Ler QR Code</strong> ou <strong>Pix Copia e Cola</strong>.</p>
                     <p className="text-[11px] text-slate-400">3. Confirme o valor de <strong>{totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>. O sistema reconhece o pagamento na hora!</p>
-                  </div>
-
-                  {/* Botão de Simulação / Teste Rápido */}
-                  <div className="w-full pt-2 border-t border-slate-800/80">
-                    <button
-                      onClick={handleApprovePayment}
-                      disabled={isProcessingApproval}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-xs border border-amber-500/30 transition-colors"
-                      title="Simular aprovação para testes sem debitar conta"
-                    >
-                      {isProcessingApproval ? (
-                        <span className="animate-spin text-sm">⏳</span>
-                      ) : (
-                        <Zap className="w-3.5 h-3.5 text-amber-400" />
-                      )}
-                      <span>Simular Aprovação Imediata (Ambiente de Teste)</span>
-                    </button>
                   </div>
 
                 </div>

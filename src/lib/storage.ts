@@ -166,6 +166,11 @@ export class AppStore {
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
   }
 
+  static clearCurrentUser(): void {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+  }
+
   static isTestMode(): boolean {
     if (typeof window === 'undefined') return true;
     const stored = localStorage.getItem(STORAGE_KEYS.TEST_MODE);

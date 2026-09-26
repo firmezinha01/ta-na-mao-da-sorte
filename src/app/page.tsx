@@ -147,7 +147,8 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           drawId: sorteio?.id,
-          forcedWinnerMilhar: options?.forcedWinnerMilhar
+          forcedWinnerMilhar: options?.forcedWinnerMilhar,
+          isSunday: options?.isSunday
         })
       });
 

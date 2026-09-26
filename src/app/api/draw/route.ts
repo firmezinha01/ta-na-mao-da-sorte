@@ -39,7 +39,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { action, drawId, forcedWinnerMilhar } = body;
+    const { action, drawId, forcedWinnerMilhar, isSunday } = body;
 
     if (action === 'new_cycle') {
       const newDraw = await ServerDrawService.startNewCycle();
@@ -49,7 +49,8 @@ export async function POST(request: Request) {
     // Ação padrão: Executa o sorteio oficial ou retorna o que já foi finalizado
     const result = await ServerDrawService.executeOfficialDraw({
       drawId,
-      forcedWinnerMilhar
+      forcedWinnerMilhar,
+      isSunday
     });
 
     return NextResponse.json({

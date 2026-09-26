@@ -76,8 +76,8 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
         setIsLastMinuteAlert(false);
       }
 
-      // Quando o cronômetro ZERA (diff === 0) -> Dispara o Sorteio Automático Simultaneamente!
-      if (totalSec === 0 && !hasTriggeredRef.current) {
+      // Quando o cronômetro ZERA (diff === 0) -> Dispara o Sorteio Automático APENAS se o sorteio não foi finalizado!
+      if (totalSec === 0 && !hasTriggeredRef.current && sorteio.status !== 'finalizado') {
         hasTriggeredRef.current = true;
         sounds.playWinFanfare();
         if (onAutoTriggerDraw) {

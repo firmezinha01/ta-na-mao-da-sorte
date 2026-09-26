@@ -18,7 +18,7 @@ export interface BrasiliaTimeComponents {
 export interface DrawSchedule {
   targetTimestamp: number; // epoch ms UTC
   targetIso: string;       // ISO string UTC
-  label: string;           // ex: "20:45h" ou "19:00h"
+  label: string;           // ex: "19:00h"
   isSunday: boolean;
   isTestMode: boolean;
 }
@@ -91,44 +91,20 @@ export function getBrasiliaTime() {
 }
 
 /**
- * Calcula a programação exata do próximo sorteio
- * - À noite (após as 20h): roda janelas de teste de 5 em 5 minutos (ex: 20:45, 20:50, etc.)
- * - Durante o dia regular: pontualmente às 19:00:00h de Brasília
+ * Programação oficial do sorteio diário:
+ * Pontualmente todos os dias às 19:00:00h de Brasília.
+ * Se já passou das 19h no dia atual, agenda o sorteio para amanhã às 19:00h.
+ * Faz um sorteio diário e PARA até o dia seguinte.
  */
 export function getNextDrawSchedule(referenceDate: Date = new Date()): DrawSchedule {
   const b = getBrasiliaComponents(referenceDate);
   const tzOffset = '-03:00';
 
-  // Modo de teste noturno para validação do usuário (entre 20h e 22h de Brasília)
-  if (b.hour === 20 || b.hour === 21) {
-    const nextMin = Math.ceil((b.minute + 1) / 5) * 5;
-    let targetHour = b.hour;
-    let targetMinute = nextMin;
-    let targetDay = b.day;
-
-    if (nextMin >= 60) {
-      targetHour += 1;
-      targetMinute = nextMin - 60;
-    }
-
-    const isoString = `${b.year}-${String(b.month + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}T${String(targetHour).padStart(2, '0')}:${String(targetMinute).padStart(2, '0')}:00${tzOffset}`;
-    const targetDate = new Date(isoString);
-
-    return {
-      targetTimestamp: targetDate.getTime(),
-      targetIso: targetDate.toISOString(),
-      label: `${String(targetHour).padStart(2, '0')}:${String(targetMinute).padStart(2, '0')}h`,
-      isSunday: b.isSunday,
-      isTestMode: true
-    };
-  }
-
-  // Horário oficial de Brasília: 19:00h
   let targetYear = b.year;
   let targetMonth = b.month + 1;
   let targetDay = b.day;
 
-  // Se já passou das 19h no horário de Brasília, o próximo é amanhã às 19h
+  // Se já passou das 19:00h de hoje no horário oficial de Brasília, o próximo sorteio é amanhã às 19:00h
   if (b.hour >= 19) {
     const tomorrow = new Date(referenceDate.getTime() + 24 * 60 * 60 * 1000);
     const tomorrowB = getBrasiliaComponents(tomorrow);
@@ -140,11 +116,14 @@ export function getNextDrawSchedule(referenceDate: Date = new Date()): DrawSched
   const isoString = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}T19:00:00${tzOffset}`;
   const targetDate = new Date(isoString);
 
+  // Verifica se o dia do sorteio agendado cai num domingo
+  const targetSunday = targetDate.getUTCDay() === 0 || (new Date(targetDate.getTime() - 3 * 3600000).getDay() === 0);
+
   return {
     targetTimestamp: targetDate.getTime(),
     targetIso: targetDate.toISOString(),
     label: '19:00h',
-    isSunday: b.isSunday,
+    isSunday: targetSunday,
     isTestMode: false
   };
 }

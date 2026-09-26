@@ -182,6 +182,7 @@ export class ServerDrawService {
   static async executeOfficialDraw(options?: {
     drawId?: string;
     forcedWinnerMilhar?: string;
+    isSunday?: boolean;
   }): Promise<DrawExecutionResult> {
     // 🔒 MUTEX CONCORRENTE: Se outra requisição (ex: PC) já estiver executando neste exato instante,
     // a requisição do Celular aguarda e recebe o MESMO resultado!
@@ -201,6 +202,7 @@ export class ServerDrawService {
   private static async runAtomicDraw(options?: {
     drawId?: string;
     forcedWinnerMilhar?: string;
+    isSunday?: boolean;
   }): Promise<DrawExecutionResult> {
     const now = Date.now();
 
@@ -270,7 +272,7 @@ export class ServerDrawService {
 
     // 5. Busca bilhetes vendidos confirmados
     const bilhetes = await this.getConfirmedTickets();
-    const isSunday = targetDraw.eh_domingo ?? false;
+    const isSunday = options?.isSunday ?? targetDraw.eh_domingo ?? false;
 
     let milharSorteado = '';
     let bilheteGanhador: Bilhete | undefined;

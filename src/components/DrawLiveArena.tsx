@@ -1,23 +1,20 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Trophy, 
-  Sparkles, 
-  Play, 
-  RotateCcw, 
   Flame, 
   CheckCircle2, 
-  AlertCircle, 
-  MessageSquare, 
+  AlertTriangle,
+  RotateCw,
   Crown,
-  Volume2
+  MessageCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Sorteio, Usuario, Bilhete, Mensagem } from '@/types';
 import { sounds } from '@/lib/sound';
-import { maskPhoneNumber, getFirstName } from '@/lib/whatsapp';
+import { maskPhoneNumber, getFirstName, generateWhatsAppWebLink, WhatsAppTemplates } from '@/lib/whatsapp';
 
 interface DrawLiveArenaProps {
   isOpen: boolean;
@@ -42,7 +39,6 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
   soldTickets,
   usuarios,
   onExecuteDraw,
-  onStartNewCycle,
   autoStart
 }) => {
   // Estado dos 4 dígitos sorteados (milhar, centena, dezena, unidade)
@@ -52,27 +48,31 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
   const [resultWinner, setResultWinner] = useState<Usuario | null>(null);
   const [drawFinished, setDrawFinished] = useState(false);
   const [accumulated, setAccumulated] = useState(false);
-  const [lastDispatchedMessages, setLastDispatchedMessages] = useState<Mensagem[]>([]);
+  const [finalMilhar, setFinalMilhar] = useState('');
+
+  // Estado para regra do Domingo: "não houve ganhador, vamos girar novamente"
+  const [sundayRetryNotice, setSundayRetryNotice] = useState<string | null>(null);
+  const [sundayCountdown, setSundayCountdown] = useState<number>(0);
+
+  // Trava para executar apenas uma única vez e parar
+  const hasTriggeredOnceRef = useRef(false);
 
   // Inicializa caso o sorteio já tenha acontecido
   useEffect(() => {
     if (sorteio.status === 'finalizado' && sorteio.numeros_sorteados) {
       const chars = sorteio.numeros_sorteados.split('') as [string, string, string, string];
       setDigits(chars);
+      setFinalMilhar(sorteio.numeros_sorteados);
       setDrawFinished(true);
       setResultWinner(sorteio.ganhador || null);
       setAccumulated(sorteio.acumulado);
-    } else {
-      setDigits(['-', '-', '-', '-']);
-      setDrawFinished(false);
-      setResultWinner(null);
-      setAccumulated(false);
     }
   }, [sorteio]);
 
-  // Se autoStart estiver ativo e o sorteio não foi finalizado, inicia automaticamente
+  // Se autoStart estiver ativo, executa UMA ÚNICA VEZ e para!
   useEffect(() => {
-    if (autoStart && isOpen && !isSpinning && !drawFinished && sorteio.status !== 'finalizado') {
+    if (autoStart && isOpen && !isSpinning && !drawFinished && sorteio.status !== 'finalizado' && !hasTriggeredOnceRef.current) {
+      hasTriggeredOnceRef.current = true;
       const timer = setTimeout(() => {
         runDrawAnimation();
       }, 500);
@@ -82,21 +82,13 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
 
   if (!isOpen) return null;
 
-  // Animação dramática de sorteio algarismo por algarismo
-  const runDrawAnimation = async (options?: { forcedWinnerMilhar?: string; isSunday?: boolean }) => {
-    setIsSpinning(true);
-    setDrawFinished(false);
-    setResultWinner(null);
-    setAccumulated(false);
+  // Função para rodar um giro nos 4 tambores até uma milhar alvo
+  const spinDrumsToTarget = async (targetMilhar: string) => {
+    const targetDigits = targetMilhar.split('');
 
-    const drawResult = await onExecuteDraw(options);
-    const targetDigits = drawResult.milhar.split('');
-
-    // Rola cada tambor sequencialmente (milhar -> centena -> dezena -> unidade)
     for (let drumIdx = 0; drumIdx < 4; drumIdx++) {
       setActiveDrum(drumIdx);
-
-      const spinDuration = 800 + drumIdx * 350;
+      const spinDuration = 700 + drumIdx * 300;
       const startTime = Date.now();
 
       await new Promise<void>((resolve) => {
@@ -118,24 +110,83 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
             });
             resolve();
           }
-        }, 60);
+        }, 55);
       });
 
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    setActiveDrum(-1);
+  };
+
+  // Animação oficial do sorteio
+  const runDrawAnimation = async (options?: { forcedWinnerMilhar?: string; isSunday?: boolean }) => {
+    setIsSpinning(true);
+    setDrawFinished(false);
+    setResultWinner(null);
+    setAccumulated(false);
+    setSundayRetryNotice(null);
+
+    // Obtém o resultado oficial do servidor (único para todos os aparelhos)
+    const drawResult = await onExecuteDraw(options);
+    const isSunday = options?.isSunday ?? sorteio.eh_domingo ?? false;
+
+    // 🌟 REGRA ESPECIAL DE DOMINGO:
+    // Se for domingo e houver bilhetes comprados, a roleta mostra o primeiro giro sem ganhador
+    // e exibe a mensagem "Não houve ganhador, vamos girar novamente" antes de premiar o vencedor!
+    if (isSunday && drawResult.ganhador) {
+      // 1. Gera um número aleatório dummy que NÃO foi comprado por ninguém
+      const soldNumbers = new Set(soldTickets.map(b => b.numero_milhar));
+      let dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      let attempts = 0;
+      while (soldNumbers.has(dummyNumber) && attempts < 20) {
+        dummyNumber = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        attempts++;
+      }
+
+      // Primeiro giro dramático
+      await spinDrumsToTarget(dummyNumber);
+
+      // Alerta de que não houve ganhador nesta rodada
+      sounds.playAccumulatedBell();
+      setSundayRetryNotice(`Milhar ${dummyNumber} não foi comprada!`);
+      setSundayCountdown(3);
+
+      // Contagem regressiva de 3 segundos
+      await new Promise<void>((resolve) => {
+        let count = 3;
+        const interval = setInterval(() => {
+          count--;
+          setSundayCountdown(count);
+          sounds.playRollTick();
+          if (count <= 0) {
+            clearInterval(interval);
+            resolve();
+          }
+        }, 1000);
+      });
+
+      setSundayRetryNotice(null);
+
+      // Segundo giro: gira e cai no vencedor oficial garantido!
+      await spinDrumsToTarget(drawResult.milhar);
+    } else {
+      // Sorteio diário padrão: gira uma única vez
+      await spinDrumsToTarget(drawResult.milhar);
     }
 
-    setActiveDrum(-1);
+    // Finaliza o sorteio e TRAVA para não repetir
     setIsSpinning(false);
     setDrawFinished(true);
+    setFinalMilhar(drawResult.milhar);
     setResultWinner(drawResult.ganhador);
     setAccumulated(drawResult.sorteio.acumulado);
-    setLastDispatchedMessages(drawResult.mensagensGeradas);
 
+    // Feedback sonoro e visual
     if (drawResult.ganhador) {
       sounds.playWinFanfare();
       confetti({
-        particleCount: 150,
-        spread: 90,
+        particleCount: 160,
+        spread: 100,
         origin: { y: 0.5 }
       });
     } else {
@@ -159,7 +210,7 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
 
         {/* Título e Badge */}
         <div className="text-center mb-4 sm:mb-6 pt-2 sm:pt-0">
-          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 sm:px-3.5 sm:py-1 rounded-full bg-red-600/20 text-red-400 border border-red-500/30 text-[10px] sm:text-xs font-black uppercase tracking-wider mb-2 animate-pulse">
+          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 sm:px-3.5 sm:py-1 rounded-full bg-red-600/20 text-red-400 border border-red-500/30 text-[10px] sm:text-xs font-black uppercase tracking-wider mb-2">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
             <span>Sorteio Oficial das 19:00h</span>
           </div>
@@ -167,12 +218,12 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
             Arena da Sorte ao Vivo
           </h2>
           <p className="text-[11px] sm:text-sm text-emerald-300/80 mt-0.5">
-            4 algarismos sorteados um a um até formar a milhar vencedora
+            {isSpinning ? 'Sorteando os algarismos oficiais...' : 'Resultado Oficial do Sorteio'}
           </p>
         </div>
 
         {/* Premiação em Jogo */}
-        <div className="bg-slate-950/80 rounded-2xl p-3 sm:p-4 border border-emerald-900/60 mb-5 sm:mb-8 text-center max-w-md mx-auto">
+        <div className="bg-slate-950/80 rounded-2xl p-3 sm:p-4 border border-emerald-900/60 mb-5 sm:mb-6 text-center max-w-md mx-auto">
           <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">
             {sorteio.acumulado ? 'Prêmio Acumulado em Disputa' : 'Prêmio em Disputa'}
           </span>
@@ -181,13 +232,27 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
           </div>
           {sorteio.eh_domingo && (
             <p className="text-[10px] sm:text-[11px] font-bold text-amber-300 mt-0.5 flex items-center justify-center gap-1">
-              <Crown className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <Crown className="w-3.5 h-3.5" />
               <span>Domingo da Sorte: Sai ganhador garantido!</span>
             </p>
           )}
         </div>
 
-        {/* OS 4 TAMBORES / DIGIT ROLLERS - 100% responsivo para celulares pequenos */}
+        {/* ALERTA DE DOMINGO: "NÃO HOUVE GANHADOR, VAMOS GIRAR NOVAMENTE!" */}
+        {sundayRetryNotice && (
+          <div className="mb-5 p-4 rounded-2xl bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white border-2 border-yellow-300 shadow-2xl animate-pulse text-center">
+            <div className="flex items-center justify-center gap-2 font-black text-sm sm:text-base">
+              <AlertTriangle className="w-5 h-5 text-yellow-200 shrink-0" />
+              <span>{sundayRetryNotice}</span>
+            </div>
+            <div className="mt-2 text-xs sm:text-sm font-extrabold text-yellow-100 flex items-center justify-center gap-2">
+              <RotateCw className="w-4 h-4 animate-spin text-yellow-300" />
+              <span>Regra de Domingo: Não houve ganhador, vamos girar novamente em {sundayCountdown}s!</span>
+            </div>
+          </div>
+        )}
+
+        {/* OS 4 TAMBORES / DIGIT ROLLERS */}
         <div className="flex items-center justify-center gap-1.5 xs:gap-2.5 sm:gap-4 my-4 sm:my-6">
           {['Milhar', 'Centena', 'Dezena', 'Unidade'].map((label, index) => {
             const digit = digits[index];
@@ -215,108 +280,81 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
           })}
         </div>
 
-        {/* FEEDBACK DO RESULTADO */}
+        {/* FEEDBACK DO RESULTADO QUANDO FINALIZADO */}
         {drawFinished && (
           <div className="mt-4 sm:mt-6 mb-4 sm:mb-6 animate-in fade-in zoom-in duration-300">
             {resultWinner ? (
-              <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 border-2 border-amber-400/80 rounded-2xl p-4 sm:p-5 text-center shadow-xl shadow-amber-500/20">
-                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-400/20 text-amber-300 text-[10px] sm:text-xs font-black uppercase mb-2">
-                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 border-2 border-amber-400/80 rounded-2xl p-4 sm:p-6 text-center shadow-xl shadow-amber-500/20">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs sm:text-sm font-black uppercase mb-2">
+                  <Trophy className="w-4 h-4 text-amber-400" />
                   <span>TEMOS UM GANHADOR!</span>
                 </div>
                 
                 <h3 className="text-xl sm:text-3xl font-black text-white">
-                  {getFirstName(resultWinner.nome_completo)}
+                  {resultWinner.nome_completo}
                 </h3>
                 
-                <p className="text-xs sm:text-sm font-mono text-emerald-400 mt-0.5">
-                  Telefone: <strong className="text-white">{maskPhoneNumber(resultWinner.whatsapp)}</strong>
+                <p className="text-xs sm:text-sm font-mono text-emerald-400 mt-1">
+                  WhatsApp: <strong className="text-white">{maskPhoneNumber(resultWinner.whatsapp)}</strong>
                 </p>
 
-                <div className="mt-2.5 text-[11px] sm:text-xs text-slate-300 bg-slate-950/80 py-1.5 px-3 rounded-xl inline-block border border-slate-800">
-                  Milhar: <span className="font-mono font-bold text-amber-400 text-sm sm:text-base">{digits.join('')}</span> • Prêmio: <span className="font-bold text-emerald-400">{formattedPrize}</span>
+                <div className="mt-3 text-xs sm:text-sm text-slate-300 bg-slate-950/80 py-2 px-4 rounded-xl inline-block border border-slate-800">
+                  Milhar Premiada: <span className="font-mono font-bold text-amber-400 text-base sm:text-lg">{finalMilhar || digits.join('')}</span> • Prêmio: <span className="font-bold text-emerald-400">{formattedPrize}</span>
                 </div>
 
-                <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] sm:text-xs text-green-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Mensagem de parabéns enviada no WhatsApp!</span>
+                <div className="mt-4 p-2.5 rounded-xl bg-green-950/60 border border-green-700/50 flex flex-col sm:flex-row items-center justify-center gap-2 text-xs sm:text-sm text-green-300">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                    <span>Mensagem de parabéns enviada automaticamente para o WhatsApp do ganhador!</span>
+                  </div>
+                  {resultWinner.whatsapp && (
+                    <a
+                      href={generateWhatsAppWebLink(
+                        resultWinner.whatsapp,
+                        WhatsAppTemplates.parabenizacaoGanhador({
+                          nomeCompleto: resultWinner.nome_completo,
+                          milhar: finalMilhar || digits.join(''),
+                          premio: sorteio.premio
+                        })
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white font-bold text-xs shadow transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>Abrir Conversa</span>
+                    </a>
+                  )}
                 </div>
               </div>
             ) : (
-              <div className="bg-slate-950/90 border border-amber-500/40 rounded-2xl p-4 sm:p-5 text-center">
-                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] sm:text-xs font-black uppercase mb-1.5">
-                  <Flame className="w-3.5 h-3.5 text-orange-400" />
+              <div className="bg-slate-950/90 border-2 border-amber-500/50 rounded-2xl p-4 sm:p-6 text-center shadow-xl">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs sm:text-sm font-black uppercase mb-2">
+                  <Flame className="w-4 h-4 text-orange-400" />
                   <span>ACUMULOU!</span>
                 </div>
                 <h3 className="text-base sm:text-xl font-extrabold text-white">
-                  Nenhum bilhete com a milhar {digits.join('')} foi comprado hoje.
+                  Nenhum bilhete com a milhar <span className="text-amber-400 font-mono font-black">{finalMilhar || digits.join('')}</span> foi comprado hoje.
                 </h3>
-                <p className="text-xs text-slate-300 mt-1">
-                  O prêmio acumulou mais R$ 500,00 para amanhã às 19:00h!
+                <p className="text-xs sm:text-sm text-slate-300 mt-2">
+                  O prêmio acumulou mais <strong className="text-emerald-400">R$ 500,00</strong> para o sorteio de amanhã às 19:00h!
                 </p>
-                <div className="mt-2.5 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
-                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Notificação de acúmulo disparada no WhatsApp.</span>
-                </div>
+                <p className="text-[11px] sm:text-xs text-slate-400 mt-1">
+                  Os bilhetes anteriores foram zerados e todos os 10.000 números já estão liberados para novas compras.
+                </p>
               </div>
             )}
           </div>
         )}
 
-        {/* BOTÕES DE CONTROLE E SIMULAÇÃO */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-3 sm:pt-4 border-t border-emerald-900/50">
-          
-          {!drawFinished ? (
-            <button
-              onClick={() => runDrawAnimation()}
-              disabled={isSpinning}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-black text-sm sm:text-base shadow-xl shadow-red-900/40 transition-all transform active:scale-95 disabled:opacity-50"
-            >
-              <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
-              <span>{isSpinning ? 'Sorteando Dígitos...' : 'Iniciar Sorteio (Simular 19:00)'}</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                onStartNewCycle();
-                setDrawFinished(false);
-                setDigits(['-', '-', '-', '-']);
-                setResultWinner(null);
-              }}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 sm:px-6 sm:py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-lg transition-all"
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span>Preparar Próximo Sorteio Diário</span>
-            </button>
-          )}
-
-          {!isSpinning && (
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              {soldTickets.length > 0 && !drawFinished && (
-                <button
-                  onClick={() => {
-                    const randomSold = soldTickets[Math.floor(Math.random() * soldTickets.length)].numero_milhar;
-                    runDrawAnimation({ forcedWinnerMilhar: randomSold });
-                  }}
-                  className="flex-1 sm:flex-initial px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/40 text-[11px] sm:text-xs font-bold transition-colors"
-                  title="Garante que sairá uma das milhares vendidas para testar o fluxo de vencedor"
-                >
-                  ⚡ Testar Ganhador
-                </button>
-              )}
-
-              {!drawFinished && (
-                <button
-                  onClick={() => runDrawAnimation({ isSunday: true })}
-                  className="flex-1 sm:flex-initial px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-purple-300 border border-purple-500/40 text-[11px] sm:text-xs font-bold transition-colors"
-                  title="Simula a regra especial de domingo onde a roleta gira até sair ganhador"
-                >
-                  👑 Domingo da Sorte
-                </button>
-              )}
-            </div>
-          )}
-
+        {/* BOTÃO PARA FECHAR E PARAR (SEM LOOPS) */}
+        <div className="flex items-center justify-center pt-3 sm:pt-4 border-t border-emerald-900/50">
+          <button
+            onClick={onClose}
+            className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm border border-slate-700 transition-all active:scale-95"
+          >
+            <span>Fechar e Acompanhar Próxima Rodada</span>
+          </button>
         </div>
 
       </div>

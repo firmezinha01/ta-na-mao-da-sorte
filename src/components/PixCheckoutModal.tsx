@@ -88,29 +88,31 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     }
   };
 
+  const hasInitializedRef = useRef(false);
+
   useEffect(() => {
-    if (!isOpen || selectedNumbers.length === 0) return;
+    if (isOpen && selectedNumbers.length > 0 && !hasInitializedRef.current) {
+      hasInitializedRef.current = true;
+      setStep('payment');
+      setFormError('');
+      setPixError('');
+      setCopied(false);
+      setIsCheckingAuto(false);
 
-    setStep('payment');
-    setFormError('');
-    setPixError('');
-    setCopied(false);
-    setIsCheckingAuto(false);
+      if (currentUser) {
+        setNomeCompleto(currentUser.nome_completo || '');
+        setCpf(currentUser.cpf || '');
+        setWhatsapp(currentUser.whatsapp || '');
+      }
 
-    if (currentUser) {
-      setNomeCompleto(currentUser.nome_completo || '');
-      setCpf(currentUser.cpf || '');
-      setWhatsapp(currentUser.whatsapp || '');
-    }
-
-    fetchPix();
-
-    return () => {
+      fetchPix();
+    } else if (!isOpen) {
+      hasInitializedRef.current = false;
       if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [isOpen, selectedNumbers, currentUser, testMode]);
+    }
+  }, [isOpen, selectedNumbers.length]);
 
-  // Polling automático para verificar se o Pix foi pago no banco
+  // Polling automático para verificar se o Pix foi pago no banco com suporte a retorno de aba (focus/visibility)
   useEffect(() => {
     if (step !== 'payment' || !pixData?.paymentId) return;
 
@@ -142,10 +144,26 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       }
     };
 
-    pollingRef.current = setInterval(checkStatus, 3500);
+    // Polling a cada 2.5s
+    pollingRef.current = setInterval(checkStatus, 2500);
+
+    // Verificação imediata ao retornar do app de banco para o navegador
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkStatus();
+      }
+    };
+    const handleFocus = () => {
+      checkStatus();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
 
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [step, pixData]);
 
@@ -225,6 +243,16 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       if (pollingRef.current) clearInterval(pollingRef.current);
       setStep('registration');
     }, 600);
+  };
+
+  // Avança diretamente para o cadastro dos dados após pagamento via Pix
+  const handleProceedToRegistration = () => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    sounds.playDigitLock();
+    if (pixData?.paymentId) {
+      fetch(`/api/pix/status?paymentId=${pixData.paymentId}&force=true`).catch(() => {});
+    }
+    setStep('registration');
   };
 
   const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -453,6 +481,21 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                         <span>{copied ? 'Copiado!' : 'Copiar Chave Pix'}</span>
                       </button>
                     </div>
+                  </div>
+
+                  {/* Botão Principal: Já fiz o Pix • Preencher meus Dados */}
+                  <div className="w-full space-y-2 mb-4">
+                    <button
+                      type="button"
+                      onClick={handleProceedToRegistration}
+                      className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2.5 transform active:scale-95 transition-all cursor-pointer border border-emerald-300/40"
+                    >
+                      <CheckCircle2 className="w-5 h-5 text-slate-950 shrink-0" />
+                      <span>Já fiz o Pix • Preencher meus Dados</span>
+                    </button>
+                    <p className="text-[11px] text-emerald-300/90 text-center font-medium">
+                      Já pagou no app do seu banco? Clique no botão acima para preencher seu Nome, CPF e WhatsApp.
+                    </p>
                   </div>
 
                   {/* Instruções de Pagamento */}

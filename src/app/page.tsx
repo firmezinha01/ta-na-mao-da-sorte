@@ -78,10 +78,21 @@ export default function Home() {
         }
       }
 
-      // Usuário salvo localmente no dispositivo
+      // Usuário salvo localmente no dispositivo (evita atualizar referência idêntica a cada 4s)
       const localUser = AppStore.getCurrentUser();
       if (localUser) {
-        setCurrentUser(localUser);
+        setCurrentUser(prev => {
+          if (!prev) return localUser;
+          if (
+            prev.id === localUser.id &&
+            prev.nome_completo === localUser.nome_completo &&
+            prev.cpf === localUser.cpf &&
+            prev.whatsapp === localUser.whatsapp
+          ) {
+            return prev;
+          }
+          return localUser;
+        });
       }
       setTestMode(AppStore.isTestMode());
     } catch (err) {

@@ -135,7 +135,7 @@ export class DatabaseService {
     const localDb = readLocalDb();
     
     // 1. Localiza ou cria o usuário
-    let user = localDb.usuarios.find(u => u.cpf === cleanCpf);
+    let user = localDb.usuarios.find(u => u.cpf.replace(/\D/g, '') === cleanCpf);
     if (!user) {
       user = {
         id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -147,16 +147,18 @@ export class DatabaseService {
       localDb.usuarios.push(user);
     } else {
       user.nome_completo = cleanName;
+      user.cpf = cleanCpf;
       user.whatsapp = cleanPhone;
     }
 
     // 2. Cria os bilhetes comprados
     const currentDraw = localDb.sorteios[localDb.sorteios.length - 1];
+    const drawId = currentDraw ? currentDraw.id : 'sorteio_oficial_diario';
     const newTickets: Bilhete[] = params.tickets.map(num => ({
       id: `bilhete_${Date.now()}_${num}`,
       numero_milhar: num,
       usuario_id: user!.id,
-      sorteio_id: currentDraw ? currentDraw.id : 'sorteio_hoje',
+      sorteio_id: drawId,
       data_compra: new Date().toISOString(),
       status_pagamento: true,
       payment_id: params.paymentId,
@@ -218,6 +220,71 @@ export class DatabaseService {
     }
 
     return { user, newTickets };
+  }
+
+  /**
+   * Consulta participante e todos os bilhetes ativos pelo CPF
+   */
+  static async getTicketsByCpf(rawCpf: string): Promise<{ user: Usuario | null; tickets: Bilhete[] }> {
+    const cleanCpf = rawCpf.replace(/\D/g, '');
+    if (!cleanCpf) {
+      return { user: null, tickets: [] };
+    }
+
+    let foundUser: Usuario | null = null;
+    let tickets: Bilhete[] = [];
+
+    // 1. Tenta buscar no Supabase
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: users, error: userErr } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('cpf', cleanCpf)
+          .limit(1);
+
+        if (!userErr && users && users.length > 0) {
+          foundUser = users[0] as Usuario;
+        }
+
+        if (foundUser) {
+          const { data: tData, error: tErr } = await supabase
+            .from('bilhetes')
+            .select('*, usuario:usuarios(*)')
+            .eq('usuario_id', foundUser.id)
+            .eq('status_pagamento', true)
+            .order('data_compra', { ascending: false });
+
+          if (!tErr && tData) {
+            tickets = tData as Bilhete[];
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar CPF no Supabase:', err);
+      }
+    }
+
+    // 2. Fallback / Mesclagem com o banco local
+    const localDb = readLocalDb();
+    if (!foundUser) {
+      foundUser = localDb.usuarios.find(u => u.cpf.replace(/\D/g, '') === cleanCpf) || null;
+    }
+
+    if (foundUser) {
+      const localTickets = (localDb.bilhetes || []).filter(
+        b => (b.usuario_id === foundUser?.id || b.usuario?.cpf?.replace(/\D/g, '') === cleanCpf) && b.status_pagamento
+      );
+
+      const existingIds = new Set(tickets.map(t => t.id));
+      for (const lt of localTickets) {
+        if (!existingIds.has(lt.id)) {
+          tickets.push({ ...lt, usuario: foundUser });
+          existingIds.add(lt.id);
+        }
+      }
+    }
+
+    return { user: foundUser, tickets };
   }
 
   /**

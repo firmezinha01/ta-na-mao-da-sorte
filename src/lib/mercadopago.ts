@@ -21,93 +21,104 @@ export interface CreatePixParams {
 export async function createPixPayment(params: CreatePixParams): Promise<PixPaymentData> {
   const mpAccessToken = process.env.MP_ACCESS_TOKEN || MP_OFFICIAL_ACCESS_TOKEN;
 
-  try {
-    const sanitizedTickets = params.tickets.join(', ');
-    const desc = `Tá Na Mão da SORTE - Milhar(es): ${sanitizedTickets}`.slice(0, 120);
-    const payerEmail = params.payerEmail || 'contato@tanamaodasorte.com.br';
+  const sanitizedTickets = params.tickets.join(', ');
+  const desc = `Tá Na Mão da SORTE - Milhar(es): ${sanitizedTickets}`.slice(0, 100);
+  const payerEmail = params.payerEmail || 'contato@tanamaodasorte.com.br';
+  const firstName = params.payerName?.trim().split(' ')[0] || 'Cliente';
+  const lastName = params.payerName?.trim().split(' ').slice(1).join(' ') || 'Sorte';
+  const cleanCpf = params.payerCpf ? params.payerCpf.replace(/\D/g, '') : '';
 
-    const mpPayload: Record<string, unknown> = {
+  const buildPayload = (includeCpf: boolean) => {
+    const payload: Record<string, unknown> = {
       transaction_amount: Number(params.amount.toFixed(2)),
       description: desc,
       payment_method_id: 'pix',
       payer: {
         email: payerEmail,
-        first_name: params.payerName?.split(' ')[0] || 'Cliente',
-        last_name: params.payerName?.split(' ').slice(1).join(' ') || 'Sorte'
+        first_name: firstName,
+        last_name: lastName
       }
     };
 
-    if (params.payerCpf) {
-      const cleanCpf = params.payerCpf.replace(/\D/g, '');
-      if (cleanCpf.length === 11) {
-        (mpPayload.payer as Record<string, unknown>).identification = {
-          type: 'CPF',
-          number: cleanCpf
-        };
-      }
+    if (includeCpf && cleanCpf.length === 11) {
+      (payload.payer as Record<string, unknown>).identification = {
+        type: 'CPF',
+        number: cleanCpf
+      };
     }
+    return payload;
+  };
 
-    const response = await fetch('https://api.mercadopago.com/v1/payments', {
+  let mpResponse: any = null;
+
+  try {
+    // Tentativa 1: Envia com CPF se fornecido
+    const payload1 = buildPayload(Boolean(cleanCpf && cleanCpf.length === 11));
+    let response = await fetch('https://api.mercadopago.com/v1/payments', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${mpAccessToken}`,
         'X-Idempotency-Key': `pix-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
       },
-      body: JSON.stringify(mpPayload)
+      body: JSON.stringify(payload1)
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      const qrCodeText = data.point_of_interaction?.transaction_data?.qr_code || '';
+    // Se falhar (ex: CPF rejeitado pelo algoritmo do Mercado Pago), retenta imediatamente sem CPF
+    if (!response.ok && payload1.payer && (payload1.payer as any).identification) {
+      const errBody = await response.json().catch(() => ({}));
+      console.warn('Tentativa 1 com CPF retornou erro no Mercado Pago:', errBody?.message || response.status, 'Retentando sem CPF...');
       
-      let qrCodeBase64 = '';
-      if (data.point_of_interaction?.transaction_data?.qr_code_base64) {
-        qrCodeBase64 = `data:image/png;base64,${data.point_of_interaction.transaction_data.qr_code_base64}`;
-      } else if (qrCodeText) {
-        qrCodeBase64 = await QRCode.toDataURL(qrCodeText, {
-          width: 320,
-          margin: 2,
-          color: { dark: '#022c22', light: '#ffffff' }
-        });
-      }
+      const payload2 = buildPayload(false);
+      response = await fetch('https://api.mercadopago.com/v1/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mpAccessToken}`,
+          'X-Idempotency-Key': `pix-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+        },
+        body: JSON.stringify(payload2)
+      });
+    }
 
-      return {
-        paymentId: String(data.id),
-        qrCode: qrCodeText,
-        qrCodeBase64,
-        copyPaste: qrCodeText,
-        amount: params.amount,
-        tickets: params.tickets,
-        expiresAt: data.date_of_expiration || new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        status: (data.status as 'pending' | 'approved' | 'rejected') || 'pending'
-      };
+    if (response.ok) {
+      mpResponse = await response.json();
     } else {
-      const errJson = await response.json();
+      const errJson = await response.json().catch(() => ({}));
       console.error('Erro na resposta do Mercado Pago API:', JSON.stringify(errJson));
+      throw new Error(errJson.message || 'Falha ao processar cobrança Pix no Mercado Pago');
     }
   } catch (err) {
     console.error('Erro ao chamar Mercado Pago API:', err);
+    throw err;
   }
 
-  // Fallback caso a API do Mercado Pago esteja temporariamente indisponível
-  const paymentId = `MOCK_${Date.now()}`;
-  const fakePixPayload = `00020126580014br.gov.bcb.pix0136${paymentId}520400005303986540${params.amount.toFixed(2)}5802BR5920TA NA MAO DA SORTE6009SAO PAULO62070503***6304ABCD`;
-  const qrCodeBase64 = await QRCode.toDataURL(fakePixPayload, {
-    width: 280,
-    margin: 2,
-    color: { dark: '#022c22', light: '#ffffff' }
-  });
+  // Gera dados oficiais a partir da resposta real do Mercado Pago
+  const qrCodeText = mpResponse?.point_of_interaction?.transaction_data?.qr_code || '';
+  if (!qrCodeText) {
+    throw new Error('Mercado Pago não retornou o código Pix (qr_code).');
+  }
+
+  let qrCodeBase64 = '';
+  if (mpResponse.point_of_interaction?.transaction_data?.qr_code_base64) {
+    qrCodeBase64 = `data:image/png;base64,${mpResponse.point_of_interaction.transaction_data.qr_code_base64}`;
+  } else {
+    qrCodeBase64 = await QRCode.toDataURL(qrCodeText, {
+      width: 320,
+      margin: 2,
+      color: { dark: '#022c22', light: '#ffffff' }
+    });
+  }
 
   return {
-    paymentId,
-    qrCode: fakePixPayload,
+    paymentId: String(mpResponse.id),
+    qrCode: qrCodeText,
     qrCodeBase64,
-    copyPaste: fakePixPayload,
+    copyPaste: qrCodeText,
     amount: params.amount,
     tickets: params.tickets,
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    status: 'pending'
+    expiresAt: mpResponse.date_of_expiration || new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    status: (mpResponse.status as 'pending' | 'approved' | 'rejected') || 'pending'
   };
 }
 

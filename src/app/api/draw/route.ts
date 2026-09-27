@@ -12,11 +12,11 @@ export async function GET() {
   try {
     const serverTime = Date.now();
     let schedule = getNextDrawSchedule();
-    const [draw, tickets, lastFinishedDraw] = await Promise.all([
+    const [draw, lastFinishedDraw] = await Promise.all([
       ServerDrawService.getCurrentOrScheduledDraw(),
-      ServerDrawService.getConfirmedTickets(),
       ServerDrawService.getLastFinishedDraw()
     ]);
+    const tickets = await ServerDrawService.getConfirmedTickets(draw.id);
     const isCutoff = isSalesCutoffActive();
 
     // Se estiver em modo de Simulação dos 7 dias (Segunda a Domingo a cada 5 min)

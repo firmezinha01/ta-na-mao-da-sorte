@@ -142,6 +142,15 @@ export class ServerDrawService {
 
         if (!error && activeDraws && activeDraws.length > 0) {
           const row = activeDraws[0] as Sorteio;
+          
+          // Se o horário do sorteio agendado já passou há mais de 30 segundos, executa automaticamente
+          const drawTime = new Date(row.data_sorteio).getTime();
+          if (row.status === 'agendado' && Date.now() >= drawTime + 30000) {
+            console.log(`[AutoDraw] Horário do sorteio ${row.id} atingido (${row.data_sorteio}). Executando sorteio oficial...`);
+            const execResult = await this.executeOfficialDraw({ drawId: row.id });
+            return execResult.sorteio;
+          }
+
           if (row.ganhador_id) {
             const { data: user } = await supabase
               .from('usuarios')
@@ -221,13 +230,19 @@ export class ServerDrawService {
   /**
    * Retorna os bilhetes vendidos e confirmados para o sorteio atual
    */
-  static async getConfirmedTickets(): Promise<Bilhete[]> {
+  static async getConfirmedTickets(drawId?: string): Promise<Bilhete[]> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('bilhetes')
           .select('*, usuario:usuarios(*)')
           .eq('status_pagamento', true);
+
+        if (drawId) {
+          query = query.eq('sorteio_id', drawId);
+        }
+
+        const { data, error } = await query;
 
         if (!error && data) {
           return data as Bilhete[];
@@ -238,7 +253,9 @@ export class ServerDrawService {
     }
 
     const local = readLocalDbFallback();
-    return (local.bilhetes || []).filter((b: Bilhete) => b.status_pagamento);
+    return (local.bilhetes || []).filter((b: Bilhete) => 
+      b.status_pagamento && (!drawId || b.sorteio_id === drawId)
+    );
   }
 
   /**
@@ -520,18 +537,21 @@ export class ServerDrawService {
       } else {
         foiAcumulado = true;
         novoPremio = targetDraw.premio + 500;
-
-        if (isSupabaseConfigured && supabase) {
-          try {
-            await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
-          } catch (e) {
-            console.warn('Erro ao zerar bilhetes no Supabase:', e);
-          }
-        }
-        const local = readLocalDbFallback();
-        local.bilhetes = [];
-        writeLocalDbFallback(local);
       }
+
+      // 🌟 REGRA DO CLIENTE:
+      // Após o sorteio (com ganhador ou acumulado), os números voltam a ser vendidos novamente!
+      // A nova rodada de vendas inicia imediatamente com todos os 10.000 números disponíveis.
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
+        } catch (e) {
+          console.warn('Erro ao zerar bilhetes no Supabase para nova rodada:', e);
+        }
+      }
+      const local = readLocalDbFallback();
+      local.bilhetes = [];
+      writeLocalDbFallback(local);
 
       // Agenda a próxima rodada oficial para amanhã às 19:00h
       const nextSchedule = getNextDrawSchedule(new Date(Date.now() + 60000));

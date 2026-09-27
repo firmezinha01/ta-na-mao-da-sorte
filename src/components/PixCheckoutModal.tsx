@@ -136,7 +136,34 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
             } catch (e) {
               console.warn('Confetti error:', e);
             }
-            setStep('registration');
+
+            // Se o participante já está identificado (fluxo padrão), salva diretamente e vai para o sucesso!
+            if (currentUser && currentUser.nome_completo && currentUser.cpf) {
+              try {
+                await fetch('/api/participants', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    nome_completo: currentUser.nome_completo.trim(),
+                    cpf: currentUser.cpf.replace(/\D/g, ''),
+                    whatsapp: currentUser.whatsapp.replace(/\D/g, ''),
+                    tickets: selectedNumbers,
+                    paymentId: pixData.paymentId
+                  })
+                });
+              } catch (err) {
+                console.warn('Erro ao salvar participante:', err);
+              }
+
+              onPaymentComplete({
+                nome_completo: currentUser.nome_completo,
+                cpf: currentUser.cpf,
+                whatsapp: currentUser.whatsapp
+              });
+              setStep('success');
+            } else {
+              setStep('registration');
+            }
           }
         }
       } catch (err) {
@@ -394,6 +421,24 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 </div>
               </div>
 
+              {/* Identificação do Participante */}
+              {currentUser && (
+                <div className="bg-emerald-950/40 rounded-xl px-3.5 py-2 border border-emerald-500/30 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center font-bold text-[10px] uppercase">
+                      {currentUser.nome_completo.charAt(0)}
+                    </div>
+                    <div>
+                      <span className="text-white font-bold block">{currentUser.nome_completo}</span>
+                      <span className="text-[10px] text-emerald-300">WhatsApp: {currentUser.whatsapp}</span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-900/80 text-emerald-300 border border-emerald-700/50">
+                    Identificado
+                  </span>
+                </div>
+              )}
+
               {/* QR Code e Código Pix */}
               {loadingPix ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3">
@@ -592,9 +637,9 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                   ))}
                 </div>
                 <div className="text-[11px] sm:text-xs text-slate-300 space-y-1 border-t border-slate-800 pt-2">
-                  <p><strong>Titular:</strong> {nomeCompleto}</p>
-                  <p><strong>WhatsApp:</strong> {whatsapp}</p>
-                  <p><strong>Sorteio:</strong> Hoje às 19:00h (Premiação R$ 500,00)</p>
+                  <p><strong>Titular:</strong> {currentUser?.nome_completo || nomeCompleto}</p>
+                  <p><strong>WhatsApp:</strong> {currentUser?.whatsapp || whatsapp}</p>
+                  <p><strong>Sorteio:</strong> Próximo Sorteio Oficial às 19:00h</p>
                 </div>
               </div>
 

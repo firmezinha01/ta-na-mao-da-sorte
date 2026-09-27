@@ -2,16 +2,19 @@
 
 import React from 'react';
 import { 
-  Trophy, 
+  LogIn, 
+  UserCheck, 
+  LogOut, 
   Ticket, 
-  HelpCircle
+  HelpCircle 
 } from 'lucide-react';
 import { Usuario } from '@/types';
 
 interface HeaderProps {
   onOpenMyTickets: () => void;
   onOpenRules: () => void;
-  onOpenLiveDraw: () => void;
+  onOpenLogin: () => void;
+  onLogout?: () => void;
   myTicketsCount: number;
   currentUser: Usuario | null;
 }
@@ -19,7 +22,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onOpenMyTickets,
   onOpenRules,
-  onOpenLiveDraw,
+  onOpenLogin,
+  onLogout,
   myTicketsCount,
   currentUser
 }) => {
@@ -49,14 +53,41 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Ações e Navegação */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Botão Sorteio ao Vivo (visível em desktop, no mobile fica em destaque na barra inferior) */}
-            <button
-              onClick={onOpenLiveDraw}
-              className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white shadow-md shadow-red-900/30 transition-all transform active:scale-95 animate-pulse"
-            >
-              <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-yellow-300" />
-              <span>Sorteio 19h</span>
-            </button>
+            {/* Botão ENTRAR no lugar do antigo Sorteio 19h */}
+            {!currentUser ? (
+              <button
+                onClick={onOpenLogin}
+                className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-black bg-gradient-to-r from-emerald-400 via-emerald-500 to-green-600 hover:from-emerald-300 hover:to-green-500 text-slate-950 shadow-md shadow-emerald-500/30 transition-all transform active:scale-95 cursor-pointer"
+                title="Entrar com Nome, CPF e WhatsApp para escolher seus números"
+              >
+                <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-950 stroke-[2.5]" />
+                <span>Entrar</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-emerald-950/70 border border-emerald-500/40 rounded-xl p-1 pr-2">
+                <button
+                  onClick={onOpenLogin}
+                  className="flex items-center gap-1.5 px-2 py-1 text-xs font-bold text-emerald-300 hover:text-white transition-colors cursor-pointer"
+                  title="Ver ou editar meus dados de participante"
+                >
+                  <div className="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center font-black text-[10px] uppercase">
+                    {currentUser.nome_completo.charAt(0)}
+                  </div>
+                  <span className="max-w-[85px] sm:max-w-[120px] truncate">
+                    {currentUser.nome_completo.split(' ')[0]}
+                  </span>
+                </button>
+                {onLogout && (
+                  <button
+                    onClick={onLogout}
+                    className="p-1 rounded-lg text-slate-400 hover:text-red-400 hover:bg-slate-900 transition-colors cursor-pointer"
+                    title="Sair / Trocar de participante"
+                  >
+                    <LogOut className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Meus Bilhetes */}
             <button
@@ -82,18 +113,6 @@ export const Header: React.FC<HeaderProps> = ({
               <HelpCircle className="w-4 h-4 text-amber-400" />
               <span className="hidden md:inline">Regras</span>
             </button>
-
-            {/* Usuário Logado */}
-            {currentUser && (
-              <div className="hidden xl:flex items-center gap-2 pl-2 border-l border-emerald-900/60 text-xs text-emerald-300">
-                <div className="w-7 h-7 rounded-full bg-emerald-800 flex items-center justify-center font-bold text-white uppercase text-[11px]">
-                  {currentUser.nome_completo.charAt(0)}
-                </div>
-                <div className="truncate max-w-[100px]">
-                  {currentUser.nome_completo.split(' ')[0]}
-                </div>
-              </div>
-            )}
 
           </div>
 

@@ -10,6 +10,7 @@ import { DrawLiveArena } from '@/components/DrawLiveArena';
 import { MyTicketsModal } from '@/components/MyTicketsModal';
 import { RulesModal } from '@/components/RulesModal';
 import { LastDrawResultCard, LastDrawInfo } from '@/components/LastDrawResultCard';
+import { UserIdentificationModal } from '@/components/UserIdentificationModal';
 import { AppStore } from '@/lib/storage';
 import { Bilhete, Sorteio, Usuario } from '@/types';
 import { 
@@ -37,6 +38,8 @@ export default function Home() {
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
 
   // Estados dos Modais
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginReasonMessage, setLoginReasonMessage] = useState('');
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isLiveDrawOpen, setIsLiveDrawOpen] = useState(false);
   const [isAutoDrawStart, setIsAutoDrawStart] = useState(false);
@@ -99,11 +102,37 @@ export default function Home() {
     }
   }, []);
 
-  // Ao iniciar ou recarregar a tela, zera as informações da sessão do cliente anterior
+  // Ao iniciar ou recarregar a tela, restaura a sessão ativa se o participante já entrou
   useEffect(() => {
+    const saved = AppStore.getCurrentUser();
+    if (saved) {
+      setCurrentUser(saved);
+    }
+  }, []);
+
+  const handleOpenLogin = (reason?: string) => {
+    setLoginReasonMessage(reason || '');
+    setIsLoginModalOpen(true);
+  };
+
+  const handleSaveUser = (userData: { nome_completo: string; cpf: string; whatsapp: string }) => {
+    const user: Usuario = {
+      id: currentUser?.id || `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      nome_completo: userData.nome_completo,
+      cpf: userData.cpf,
+      whatsapp: userData.whatsapp,
+      data_cadastro: currentUser?.data_cadastro || new Date().toISOString()
+    };
+    AppStore.setCurrentUser(user);
+    setCurrentUser(user);
+    loadData();
+  };
+
+  const handleLogout = () => {
     AppStore.clearCurrentUser();
     setCurrentUser(null);
-  }, []);
+    setSelectedNumbers([]);
+  };
 
   // Handlers para o gesto móvel de arrastar para baixo e atualizar (Pull-to-Refresh)
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -300,10 +329,8 @@ export default function Home() {
       <Header
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         onOpenRules={() => setIsRulesOpen(true)}
-        onOpenLiveDraw={() => {
-          setIsAutoDrawStart(false);
-          setIsLiveDrawOpen(true);
-        }}
+        onOpenLogin={() => handleOpenLogin()}
+        onLogout={handleLogout}
         myTicketsCount={myTickets.length}
         currentUser={currentUser}
       />
@@ -336,6 +363,8 @@ export default function Home() {
           soldTickets={bilhetes}
           myTickets={myTickets}
           selectedNumbers={selectedNumbers}
+          currentUser={currentUser}
+          onRequireLogin={(reason) => handleOpenLogin(reason)}
           onToggleNumber={handleToggleNumber}
           onSelectMultiple={handleSelectMultiple}
           onClearSelection={handleClearSelection}
@@ -420,6 +449,16 @@ export default function Home() {
         }}
         onOpenMyTickets={() => setIsMyTicketsOpen(true)}
         myTicketsCount={myTickets.length}
+      />
+
+      {/* MODAL 0: Identificação e Entrada do Participante (Nome, CPF e WhatsApp) */}
+      <UserIdentificationModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        currentUser={currentUser}
+        onSaveUser={handleSaveUser}
+        onLogout={handleLogout}
+        reasonMessage={loginReasonMessage}
       />
 
       {/* MODAL 1: Checkout Pix (Mercado Pago Oficial) */}

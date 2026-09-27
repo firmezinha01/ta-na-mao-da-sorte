@@ -13,9 +13,10 @@ import {
   ShoppingCart,
   Filter,
   RefreshCw,
-  Clock
+  Clock,
+  UserCheck
 } from 'lucide-react';
-import { Bilhete } from '@/types';
+import { Bilhete, Usuario } from '@/types';
 import { sounds } from '@/lib/sound';
 import { isSalesCutoffActive } from '@/lib/drawTime';
 
@@ -23,6 +24,8 @@ interface TicketGridProps {
   soldTickets: Bilhete[];
   myTickets: Bilhete[];
   selectedNumbers: string[];
+  currentUser: Usuario | null;
+  onRequireLogin: (reason?: string) => void;
   onToggleNumber: (num: string) => void;
   onSelectMultiple: (nums: string[]) => void;
   onClearSelection: () => void;
@@ -35,6 +38,8 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
   soldTickets,
   myTickets,
   selectedNumbers,
+  currentUser,
+  onRequireLogin,
   onToggleNumber,
   onSelectMultiple,
   onClearSelection,
@@ -129,6 +134,10 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
 
   // Função Surpresinha (Gerador da Sorte de milhares aleatórios não vendidos)
   const handleSurpresinha = (quantity: number) => {
+    if (!currentUser) {
+      onRequireLogin('Para gerar bilhetes da Surpresinha, preencha seu Nome, CPF e WhatsApp antes.');
+      return;
+    }
     sounds.playClick();
     const availablePool: string[] = [];
 
@@ -156,6 +165,10 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
 
   const handleNumberClick = (numStr: string) => {
     if (soldSet.has(numStr)) return;
+    if (!currentUser) {
+      onRequireLogin(`Para escolher a milhar ${numStr}, preencha seu Nome, CPF e WhatsApp antes.`);
+      return;
+    }
     sounds.playClick();
     onToggleNumber(numStr);
   };
@@ -165,6 +178,31 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
   return (
     <section id="ticket-grid-section" className="w-full my-6 sm:my-8 scroll-mt-20 sm:scroll-mt-24 pb-20 sm:pb-8">
       
+      {/* Aviso quando o usuário ainda não entrou */}
+      {!currentUser && (
+        <div className="mb-4 p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/90 border border-emerald-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg shadow-emerald-950/50">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+              <UserCheck className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5">
+                <span>Identificação Obrigatória para Escolher Números</span>
+              </p>
+              <p className="text-[11px] text-slate-300">
+                Preencha seu <strong>Nome, CPF e WhatsApp</strong> para liberar a escolha das milhares e garantir seu prêmio.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onRequireLogin('Informe seus dados para poder selecionar suas milhares da sorte.')}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 hover:from-emerald-300 hover:to-green-400 text-slate-950 font-black text-xs transition-all shadow-md shrink-0 cursor-pointer text-center"
+          >
+            Entrar / Preencher Dados →
+          </button>
+        </div>
+      )}
+
       {/* Cabeçalho da Seção */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
         <div>

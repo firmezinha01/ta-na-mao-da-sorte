@@ -1,7 +1,22 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async rewrites() {
+    return [
+      {
+        source: '/afiliados',
+        destination: '/afiliados/index.html',
+      },
+      {
+        source: '/area-do-afiliado',
+        destination: '/afiliados/index.html',
+      },
+      {
+        source: '/afiliados/:path((?!assets/).*)',
+        destination: '/afiliados/index.html',
+      },
+    ];
+  },
 };
 
 export default nextConfig;

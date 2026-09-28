@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:afiliados": "npm --prefix afiliados run build && node -e \"require('fs').cpSync('afiliados/dist', 'public/afiliados', {recursive: true})\"",
     "start": "next start",
     "lint": "eslint"
   },

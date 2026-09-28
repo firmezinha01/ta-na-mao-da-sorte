@@ -34,8 +34,16 @@ export class AuthService {
     const cleanDoc = identifier.replace(/\D/g, '');
 
     // 1. Check for Admin
-    if (cleanId === 'admin@tanamaodasorte.com.br' || cleanId === 'admin') {
-      if (pass === 'admin123' || pass.length >= 6) {
+    const isAdmin = (
+      cleanId === 'admin@tanamaodasorte.com.br' ||
+      cleanId === 'admin' ||
+      cleanId === 'adm'
+    );
+
+    if (isAdmin) {
+      // Senhas autorizadas para o painel administrativo de afiliados
+      const validAdminPasswords = ['sorte777', 'admin777', 'sorte2026', 'admin123'];
+      if (validAdminPasswords.includes(pass.trim())) {
         const adminProfile: UserProfile = {
           uid: 'admin_master',
           email: 'admin@tanamaodasorte.com.br',
@@ -45,7 +53,7 @@ export class AuthService {
         localStorage.setItem(SESSION_KEY, JSON.stringify(adminProfile));
         return { success: true, user: adminProfile };
       }
-      return { success: false, error: 'Senha incorreta para a conta de administrador.' };
+      return { success: false, error: 'Senha incorreta para a conta de administrador do painel de afiliados.' };
     }
 
     // 2. Check for Affiliate

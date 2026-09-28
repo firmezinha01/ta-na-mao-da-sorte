@@ -7,7 +7,7 @@ interface AuthContextType {
   currentAffiliate: Affiliate | null;
   role: 'affiliate' | 'admin' | null;
   isLoading: boolean;
-  login: (id: string, pass: string) => Promise<{ success: boolean; error?: string }>;
+  login: (id: string, pass: string) => Promise<{ success: boolean; user?: UserProfile; affiliate?: Affiliate; error?: string }>;
   register: (data: any) => Promise<{ success: boolean; affiliate?: Affiliate; error?: string }>;
   logout: () => void;
   refreshAffiliate: () => void;

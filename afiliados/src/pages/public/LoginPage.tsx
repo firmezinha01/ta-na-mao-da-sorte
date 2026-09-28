@@ -43,7 +43,8 @@ export const LoginPage: React.FC = () => {
     setIsLoading(false);
 
     if (res.success) {
-      if (identifier.toLowerCase() === 'admin@tanamaodasorte.com.br' || identifier.toLowerCase() === 'admin') {
+      const clean = identifier.trim().toLowerCase();
+      if (res.user?.role === 'admin' || clean === 'admin@tanamaodasorte.com.br' || clean === 'admin' || clean === 'adm') {
         navigate('/afiliados/admin');
       } else {
         navigate('/afiliados/dashboard');
@@ -68,19 +69,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Quick fill helper for testing!
-  const fillAffiliateDemo = () => {
-    setIdentifier('lucas.afiliado@tanamaodasorte.com.br');
-    setPassword('senha123');
-    setError(null);
-  };
-
-  const fillAdminDemo = () => {
-    setIdentifier('admin@tanamaodasorte.com.br');
-    setPassword('admin123');
-    setError(null);
-  };
-
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
       <Header />
@@ -98,29 +86,6 @@ export const LoginPage: React.FC = () => {
           <p className="text-xs text-slate-400 mt-1">
             Entre para acompanhar cliques, conversões e solicitar saques Pix.
           </p>
-        </div>
-
-        {/* Demo Fast Login Pills */}
-        <div className="mb-6 p-3 bg-slate-900/60 rounded-2xl border border-slate-800 text-center">
-          <p className="text-[11px] text-slate-400 mb-2 font-bold uppercase tracking-wider">
-            Acesso Rápido para Testes:
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={fillAffiliateDemo}
-              className="flex-1 py-1.5 px-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-            >
-              Demo: Afiliado Aprovado
-            </button>
-            <button
-              type="button"
-              onClick={fillAdminDemo}
-              className="flex-1 py-1.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-            >
-              Demo: Administrador
-            </button>
-          </div>
         </div>
 
         {/* Form Card */}

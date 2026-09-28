@@ -44,53 +44,7 @@ export const INITIAL_SORTEIO: Sorteio = {
   eh_domingo: new Date().getDay() === 0 // true se hoje for domingo
 };
 
-export const INITIAL_BILHETES: Bilhete[] = [
-  {
-    id: 'bilhete_1',
-    numero_milhar: '1234',
-    usuario_id: 'usr_1',
-    sorteio_id: 'sorteio_hoje',
-    data_compra: '2026-09-24T11:00:00Z',
-    status_pagamento: true,
-    valor: 2.00
-  },
-  {
-    id: 'bilhete_2',
-    numero_milhar: '7777',
-    usuario_id: 'usr_2',
-    sorteio_id: 'sorteio_hoje',
-    data_compra: '2026-09-24T12:30:00Z',
-    status_pagamento: true,
-    valor: 2.00
-  },
-  {
-    id: 'bilhete_3',
-    numero_milhar: '0420',
-    usuario_id: 'usr_3',
-    sorteio_id: 'sorteio_hoje',
-    data_compra: '2026-09-24T13:45:00Z',
-    status_pagamento: true,
-    valor: 2.00
-  },
-  {
-    id: 'bilhete_4',
-    numero_milhar: '9850',
-    usuario_id: 'usr_4',
-    sorteio_id: 'sorteio_hoje',
-    data_compra: '2026-09-24T14:10:00Z',
-    status_pagamento: true,
-    valor: 2.00
-  },
-  {
-    id: 'bilhete_5',
-    numero_milhar: '0007',
-    usuario_id: 'usr_1',
-    sorteio_id: 'sorteio_hoje',
-    data_compra: '2026-09-24T14:50:00Z',
-    status_pagamento: true,
-    valor: 2.00
-  }
-];
+export const INITIAL_BILHETES: Bilhete[] = [];
 
 export const INITIAL_MENSAGENS: Mensagem[] = [
   {

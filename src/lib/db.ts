@@ -38,35 +38,7 @@ const DEFAULT_DB: DatabaseSchema = {
       data_cadastro: '2026-09-24T16:15:00Z'
     }
   ],
-  bilhetes: [
-    {
-      id: 'bilhete_seed_1',
-      numero_milhar: '1234',
-      usuario_id: 'usr_seed_1',
-      sorteio_id: 'sorteio_hoje',
-      data_compra: '2026-09-24T11:00:00Z',
-      status_pagamento: true,
-      valor: 2.00
-    },
-    {
-      id: 'bilhete_seed_2',
-      numero_milhar: '7777',
-      usuario_id: 'usr_seed_2',
-      sorteio_id: 'sorteio_hoje',
-      data_compra: '2026-09-24T12:30:00Z',
-      status_pagamento: true,
-      valor: 2.00
-    },
-    {
-      id: 'bilhete_seed_3',
-      numero_milhar: '0420',
-      usuario_id: 'usr_seed_3',
-      sorteio_id: 'sorteio_hoje',
-      data_compra: '2026-09-24T13:45:00Z',
-      status_pagamento: true,
-      valor: 2.00
-    }
-  ],
+  bilhetes: [],
   sorteios: [
     {
       id: 'sorteio_hoje',
@@ -277,7 +249,7 @@ export class DatabaseService {
     let foundUser: Usuario | null = null;
     let tickets: Bilhete[] = [];
 
-    // 1. Tenta buscar no Supabase
+    // 1. Tenta buscar no Supabase (Fonte de Verdade Principal)
     if (isSupabaseConfigured && supabase) {
       try {
         const { data: users, error: userErr } = await supabase
@@ -301,13 +273,22 @@ export class DatabaseService {
           if (!tErr && tData) {
             tickets = tData as Bilhete[];
           }
+
+          // Se encontrou dados no Supabase, deduplica estritamente por número da milhar e retorna direto
+          const uniqueMap = new Map<string, Bilhete>();
+          for (const t of tickets) {
+            if (!uniqueMap.has(t.numero_milhar)) {
+              uniqueMap.set(t.numero_milhar, t);
+            }
+          }
+          return { user: foundUser, tickets: Array.from(uniqueMap.values()) };
         }
       } catch (err) {
         console.warn('Erro ao consultar CPF no Supabase:', err);
       }
     }
 
-    // 2. Fallback / Mesclagem com o banco local
+    // 2. Fallback com o banco local caso Supabase falhe ou usuário só exista local
     const localDb = readLocalDb();
     if (!foundUser) {
       foundUser = localDb.usuarios.find(u => u.cpf.replace(/\D/g, '') === cleanCpf) || null;
@@ -323,19 +304,11 @@ export class DatabaseService {
       }
     }
 
-    // 3. Deduplica estritamente por número da milhar para garantir que cada milhar só apareça uma vez
+    // 3. Deduplica estritamente por número da milhar
     const uniqueMap = new Map<string, Bilhete>();
     for (const t of tickets) {
-      const key = `${t.numero_milhar}_${t.sorteio_id || 'default'}`;
-      if (!uniqueMap.has(key)) {
-        uniqueMap.set(key, t);
-      } else {
-        const existing = uniqueMap.get(key)!;
-        const eTime = new Date(existing.data_compra || 0).getTime();
-        const tTime = new Date(t.data_compra || 0).getTime();
-        if (tTime > eTime) {
-          uniqueMap.set(key, t);
-        }
+      if (!uniqueMap.has(t.numero_milhar)) {
+        uniqueMap.set(t.numero_milhar, t);
       }
     }
 
@@ -365,7 +338,7 @@ export class DatabaseService {
    * Retorna todos os bilhetes vendidos (sem duplicatas, com dados do usuário)
    */
   static async getTickets(): Promise<Bilhete[]> {
-    let tickets: Bilhete[] = [];
+    // 1. Tenta buscar no Supabase como fonte única de verdade
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase
@@ -374,39 +347,34 @@ export class DatabaseService {
           .eq('status_pagamento', true)
           .order('data_compra', { ascending: false });
 
-        if (!error && data && data.length > 0) {
-          tickets = data as Bilhete[];
+        if (!error && data) {
+          const map = new Map<string, Bilhete>();
+          for (const b of data as Bilhete[]) {
+            if (!map.has(b.numero_milhar)) {
+              map.set(b.numero_milhar, b);
+            }
+          }
+          return Array.from(map.values());
         }
       } catch (err) {
         console.warn('Erro ao consultar bilhetes no Supabase:', err);
       }
     }
 
+    // 2. Fallback estrito apenas se Supabase não estiver disponível
     const localDb = readLocalDb();
-    const localTickets = (localDb.bilhetes || []).filter(b => b.status_pagamento);
-
-    // Mescla e preenche dados do usuário se estiver faltando
-    const ticketMap = new Map<string, Bilhete>();
-    for (const t of [...tickets, ...localTickets]) {
-      if (!t.usuario && t.usuario_id) {
-        const u = localDb.usuarios.find(user => user.id === t.usuario_id);
-        if (u) t.usuario = u;
-      }
-
-      const key = `${t.numero_milhar}_${t.sorteio_id || 'default'}`;
-      if (!ticketMap.has(key)) {
-        ticketMap.set(key, t);
-      } else {
-        const existing = ticketMap.get(key)!;
-        const eTime = new Date(existing.data_compra || 0).getTime();
-        const tTime = new Date(t.data_compra || 0).getTime();
-        if (tTime > eTime) {
-          ticketMap.set(key, t);
+    const map = new Map<string, Bilhete>();
+    for (const b of (localDb.bilhetes || [])) {
+      if (b.status_pagamento && !map.has(b.numero_milhar)) {
+        if (!b.usuario && b.usuario_id) {
+          const u = localDb.usuarios.find(user => user.id === b.usuario_id);
+          if (u) b.usuario = u;
         }
+        map.set(b.numero_milhar, b);
       }
     }
 
-    return Array.from(ticketMap.values());
+    return Array.from(map.values());
   }
 
   /**

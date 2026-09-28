@@ -83,7 +83,7 @@ export default function AdminPage() {
       }
 
       // 2. Bilhetes Vendidos da API (Lista oficial completa do banco)
-      let loadedTickets: Bilhete[] = [];
+      let loadedTickets: Bilhete[] | null = null;
       try {
         const resTickets = await fetch('/api/tickets?all=true');
         if (resTickets.ok) {
@@ -101,18 +101,17 @@ export default function AdminPage() {
       if (resDraw.ok) {
         const drawData = await resDraw.json();
         if (drawData.draw) setSorteio(drawData.draw);
-        if (loadedTickets.length > 0) {
+        if (loadedTickets !== null) {
           setTickets(loadedTickets);
-        } else if (drawData.tickets && drawData.tickets.length > 0) {
+        } else if (drawData.tickets && Array.isArray(drawData.tickets)) {
           setTickets(drawData.tickets);
         } else {
           setTickets([]);
         }
-      } else if (loadedTickets.length > 0) {
+      } else if (loadedTickets !== null) {
         setTickets(loadedTickets);
       } else {
-        setTickets(AppStore.getBilhetes());
-        setSorteio(AppStore.getSorteio());
+        setTickets([]);
       }
       setMessages(AppStore.getMensagens());
     } catch (err) {

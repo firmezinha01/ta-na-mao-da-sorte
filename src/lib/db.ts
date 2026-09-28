@@ -151,10 +151,39 @@ export class DatabaseService {
       user.whatsapp = cleanPhone;
     }
 
-    // 2. Cria os bilhetes comprados
-    const currentDraw = localDb.sorteios[localDb.sorteios.length - 1];
-    const drawId = currentDraw ? currentDraw.id : 'sorteio_oficial_diario';
-    const newTickets: Bilhete[] = params.tickets.map(num => ({
+    // 2. Localiza o sorteio ativo oficial (Supabase ou local)
+    let drawId = 'sorteio_hoje';
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: activeDraws } = await supabase
+          .from('sorteios')
+          .select('id')
+          .in('status', ['agendado', 'em_andamento'])
+          .order('data_sorteio', { ascending: true })
+          .limit(1);
+
+        if (activeDraws && activeDraws.length > 0 && activeDraws[0].id) {
+          drawId = activeDraws[0].id;
+        }
+      } catch (e) {
+        console.warn('Erro ao consultar sorteio ativo para bilhete:', e);
+      }
+    }
+    if (drawId === 'sorteio_hoje') {
+      const currentDraw = localDb.sorteios[localDb.sorteios.length - 1];
+      if (currentDraw) drawId = currentDraw.id;
+    }
+
+    // 3. Cria os bilhetes comprados evitando duplicações acidentais
+    const uniqueRequestedNumbers = [...new Set(params.tickets)];
+    const existingMilhares = new Set(
+      (localDb.bilhetes || [])
+        .filter(b => b.sorteio_id === drawId && b.usuario_id === user!.id)
+        .map(b => b.numero_milhar)
+    );
+
+    const toInsert = uniqueRequestedNumbers.filter(n => !existingMilhares.has(n));
+    const newTickets: Bilhete[] = toInsert.map(num => ({
       id: `bilhete_${Date.now()}_${num}`,
       numero_milhar: num,
       usuario_id: user!.id,
@@ -166,10 +195,12 @@ export class DatabaseService {
       usuario: user
     }));
 
-    localDb.bilhetes.push(...newTickets);
-    writeLocalDb(localDb);
+    if (newTickets.length > 0) {
+      localDb.bilhetes.push(...newTickets);
+      writeLocalDb(localDb);
+    }
 
-    // 3. Se o Supabase estiver configurado com credenciais válidas, sincroniza na nuvem
+    // 4. Se o Supabase estiver configurado com credenciais válidas, sincroniza na nuvem
     if (isSupabaseConfigured && supabase) {
       try {
         let supabaseUserId = user.id;
@@ -200,19 +231,31 @@ export class DatabaseService {
           });
         }
 
-        // Insere os bilhetes comprados vinculando ao usuário
+        // Insere os bilhetes comprados vinculando ao usuário sem duplicar
         if (newTickets.length > 0) {
-          const supabaseTickets = newTickets.map(t => ({
-            id: t.id,
-            numero_milhar: t.numero_milhar,
-            usuario_id: supabaseUserId,
-            sorteio_id: t.sorteio_id,
-            data_compra: t.data_compra,
-            status_pagamento: t.status_pagamento,
-            valor: t.valor
-          }));
+          const { data: existingSbTickets } = await supabase
+            .from('bilhetes')
+            .select('numero_milhar')
+            .eq('sorteio_id', drawId)
+            .eq('usuario_id', supabaseUserId)
+            .in('numero_milhar', newTickets.map(t => t.numero_milhar));
 
-          await supabase.from('bilhetes').insert(supabaseTickets);
+          const existingSbMilhares = new Set((existingSbTickets || []).map(b => b.numero_milhar));
+          const sbToInsert = newTickets
+            .filter(t => !existingSbMilhares.has(t.numero_milhar))
+            .map(t => ({
+              id: t.id,
+              numero_milhar: t.numero_milhar,
+              usuario_id: supabaseUserId,
+              sorteio_id: t.sorteio_id,
+              data_compra: t.data_compra,
+              status_pagamento: t.status_pagamento,
+              valor: t.valor
+            }));
+
+          if (sbToInsert.length > 0) {
+            await supabase.from('bilhetes').insert(sbToInsert);
+          }
         }
       } catch (err) {
         console.warn('Erro ao sincronizar com Supabase:', err);
@@ -223,7 +266,7 @@ export class DatabaseService {
   }
 
   /**
-   * Consulta participante e todos os bilhetes ativos pelo CPF
+   * Consulta participante e todos os bilhetes ativos pelo CPF (sem duplicatas)
    */
   static async getTicketsByCpf(rawCpf: string): Promise<{ user: Usuario | null; tickets: Bilhete[] }> {
     const cleanCpf = rawCpf.replace(/\D/g, '');
@@ -275,16 +318,28 @@ export class DatabaseService {
         b => (b.usuario_id === foundUser?.id || b.usuario?.cpf?.replace(/\D/g, '') === cleanCpf) && b.status_pagamento
       );
 
-      const existingIds = new Set(tickets.map(t => t.id));
       for (const lt of localTickets) {
-        if (!existingIds.has(lt.id)) {
-          tickets.push({ ...lt, usuario: foundUser });
-          existingIds.add(lt.id);
+        tickets.push({ ...lt, usuario: foundUser });
+      }
+    }
+
+    // 3. Deduplica estritamente por número da milhar para garantir que cada milhar só apareça uma vez
+    const uniqueMap = new Map<string, Bilhete>();
+    for (const t of tickets) {
+      const key = `${t.numero_milhar}_${t.sorteio_id || 'default'}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, t);
+      } else {
+        const existing = uniqueMap.get(key)!;
+        const eTime = new Date(existing.data_compra || 0).getTime();
+        const tTime = new Date(t.data_compra || 0).getTime();
+        if (tTime > eTime) {
+          uniqueMap.set(key, t);
         }
       }
     }
 
-    return { user: foundUser, tickets };
+    return { user: foundUser, tickets: Array.from(uniqueMap.values()) };
   }
 
   /**
@@ -307,14 +362,20 @@ export class DatabaseService {
   }
 
   /**
-   * Retorna todos os bilhetes vendidos
+   * Retorna todos os bilhetes vendidos (sem duplicatas, com dados do usuário)
    */
   static async getTickets(): Promise<Bilhete[]> {
+    let tickets: Bilhete[] = [];
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase.from('bilhetes').select('*, usuario:usuarios(*)');
+        const { data, error } = await supabase
+          .from('bilhetes')
+          .select('*, usuario:usuarios(*)')
+          .eq('status_pagamento', true)
+          .order('data_compra', { ascending: false });
+
         if (!error && data && data.length > 0) {
-          return data as Bilhete[];
+          tickets = data as Bilhete[];
         }
       } catch (err) {
         console.warn('Erro ao consultar bilhetes no Supabase:', err);
@@ -322,7 +383,30 @@ export class DatabaseService {
     }
 
     const localDb = readLocalDb();
-    return localDb.bilhetes;
+    const localTickets = (localDb.bilhetes || []).filter(b => b.status_pagamento);
+
+    // Mescla e preenche dados do usuário se estiver faltando
+    const ticketMap = new Map<string, Bilhete>();
+    for (const t of [...tickets, ...localTickets]) {
+      if (!t.usuario && t.usuario_id) {
+        const u = localDb.usuarios.find(user => user.id === t.usuario_id);
+        if (u) t.usuario = u;
+      }
+
+      const key = `${t.numero_milhar}_${t.sorteio_id || 'default'}`;
+      if (!ticketMap.has(key)) {
+        ticketMap.set(key, t);
+      } else {
+        const existing = ticketMap.get(key)!;
+        const eTime = new Date(existing.data_compra || 0).getTime();
+        const tTime = new Date(t.data_compra || 0).getTime();
+        if (tTime > eTime) {
+          ticketMap.set(key, t);
+        }
+      }
+    }
+
+    return Array.from(ticketMap.values());
   }
 
   /**

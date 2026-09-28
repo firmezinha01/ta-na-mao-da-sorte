@@ -12,11 +12,14 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const rawCpf = searchParams.get('cpf');
 
-    if (!rawCpf) {
-      return NextResponse.json(
-        { error: 'Por favor, informe o CPF para consultar os bilhetes.' },
-        { status: 400 }
-      );
+    // Se não informou CPF ou solicitou all=true, retorna todos os bilhetes vendidos (Painel Administrativo)
+    if (!rawCpf || searchParams.get('all') === 'true') {
+      const tickets = await DatabaseService.getTickets();
+      return NextResponse.json({
+        success: true,
+        tickets,
+        total: tickets.length
+      });
     }
 
     const cleanCpf = rawCpf.replace(/\D/g, '');

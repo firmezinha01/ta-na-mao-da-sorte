@@ -228,7 +228,7 @@ export class ServerDrawService {
   }
 
   /**
-   * Retorna os bilhetes vendidos e confirmados para o sorteio atual
+   * Retorna os bilhetes vendidos e confirmados para o sorteio atual (sem duplicatas)
    */
   static async getConfirmedTickets(drawId?: string): Promise<Bilhete[]> {
     if (isSupabaseConfigured && supabase) {
@@ -239,13 +239,19 @@ export class ServerDrawService {
           .eq('status_pagamento', true);
 
         if (drawId) {
-          query = query.eq('sorteio_id', drawId);
+          query = query.or(`sorteio_id.eq.${drawId},sorteio_id.eq.sorteio_hoje,sorteio_id.eq.sorteio_oficial_diario`);
         }
 
         const { data, error } = await query;
 
         if (!error && data) {
-          return data as Bilhete[];
+          const map = new Map<string, Bilhete>();
+          for (const b of data as Bilhete[]) {
+            if (!map.has(b.numero_milhar)) {
+              map.set(b.numero_milhar, b);
+            }
+          }
+          return Array.from(map.values());
         }
       } catch (e) {
         console.warn('Erro ao buscar bilhetes confirmados:', e);
@@ -253,9 +259,15 @@ export class ServerDrawService {
     }
 
     const local = readLocalDbFallback();
-    return (local.bilhetes || []).filter((b: Bilhete) => 
-      b.status_pagamento && (!drawId || b.sorteio_id === drawId)
-    );
+    const map = new Map<string, Bilhete>();
+    for (const b of (local.bilhetes || [])) {
+      if (b.status_pagamento && (!drawId || b.sorteio_id === drawId || b.sorteio_id === 'sorteio_hoje' || b.sorteio_id === 'sorteio_oficial_diario')) {
+        if (!map.has(b.numero_milhar)) {
+          map.set(b.numero_milhar, b);
+        }
+      }
+    }
+    return Array.from(map.values());
   }
 
   /**

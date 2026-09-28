@@ -82,12 +82,34 @@ export default function AdminPage() {
         setParticipants(data.participants || []);
       }
 
-      // 2. Bilhetes e Sorteio da API Central
+      // 2. Bilhetes Vendidos da API (Lista oficial completa do banco)
+      let loadedTickets: Bilhete[] = [];
+      try {
+        const resTickets = await fetch('/api/tickets?all=true');
+        if (resTickets.ok) {
+          const tData = await resTickets.json();
+          if (tData.tickets && Array.isArray(tData.tickets)) {
+            loadedTickets = tData.tickets;
+          }
+        }
+      } catch (tErr) {
+        console.warn('Erro ao buscar bilhetes via /api/tickets:', tErr);
+      }
+
+      // 3. Sorteio e Bilhetes da API Central
       const resDraw = await fetch('/api/draw');
       if (resDraw.ok) {
         const drawData = await resDraw.json();
         if (drawData.draw) setSorteio(drawData.draw);
-        if (drawData.tickets) setTickets(drawData.tickets);
+        if (loadedTickets.length > 0) {
+          setTickets(loadedTickets);
+        } else if (drawData.tickets && drawData.tickets.length > 0) {
+          setTickets(drawData.tickets);
+        } else {
+          setTickets([]);
+        }
+      } else if (loadedTickets.length > 0) {
+        setTickets(loadedTickets);
       } else {
         setTickets(AppStore.getBilhetes());
         setSorteio(AppStore.getSorteio());

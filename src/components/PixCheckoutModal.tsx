@@ -52,6 +52,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   const [formError, setFormError] = useState('');
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const isPaymentApprovedHandledRef = useRef(false);
 
   // Inicializa e gera o Pix ao abrir o modal
   const fetchPix = async () => {
@@ -91,6 +92,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   useEffect(() => {
     if (isOpen && selectedNumbers.length > 0 && !hasInitializedRef.current) {
       hasInitializedRef.current = true;
+      isPaymentApprovedHandledRef.current = false;
       setStep('payment');
       setFormError('');
       setPixError('');
@@ -110,6 +112,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       fetchPix();
     } else if (!isOpen) {
       hasInitializedRef.current = false;
+      isPaymentApprovedHandledRef.current = false;
       if (pollingRef.current) clearInterval(pollingRef.current);
     }
   }, [isOpen, selectedNumbers.length]);
@@ -119,12 +122,15 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     if (step !== 'payment' || !pixData?.paymentId) return;
 
     const checkStatus = async () => {
+      if (isPaymentApprovedHandledRef.current) return;
       try {
         setIsCheckingAuto(true);
         const res = await fetch(`/api/pix/status?paymentId=${pixData.paymentId}`);
         if (res.ok) {
           const result = await res.json();
           if (result.status === 'approved') {
+            if (isPaymentApprovedHandledRef.current) return;
+            isPaymentApprovedHandledRef.current = true;
             if (pollingRef.current) clearInterval(pollingRef.current);
             sounds.playWinFanfare();
             try {

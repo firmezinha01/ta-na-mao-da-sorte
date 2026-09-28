@@ -75,16 +75,24 @@ export const MyTicketsModal: React.FC<MyTicketsModalProps> = ({
           t => t.usuario?.cpf?.replace(/\D/g, '') === cleanCpf
         );
 
-        const idSet = new Set(serverTickets.map(t => t.id));
-        const merged = [...serverTickets];
-        for (const lt of localMatching) {
-          if (!idSet.has(lt.id)) {
-            merged.push(lt);
-            idSet.add(lt.id);
+        // Deduplica estritamente por número da milhar para garantir que cada bilhete apareça apenas uma vez
+        const ticketMap = new Map<string, Bilhete>();
+        for (const t of [...serverTickets, ...localMatching]) {
+          const key = t.numero_milhar;
+          if (!ticketMap.has(key)) {
+            ticketMap.set(key, t);
+          } else {
+            const existing = ticketMap.get(key)!;
+            const existingTime = new Date(existing.data_compra || 0).getTime();
+            const newTime = new Date(t.data_compra || 0).getTime();
+            if (newTime > existingTime) {
+              ticketMap.set(key, t);
+            }
           }
         }
 
-        setSearchedTickets(merged);
+        const deduplicated = Array.from(ticketMap.values());
+        setSearchedTickets(deduplicated);
         setHasSearched(true);
       } else {
         const err = await res.json().catch(() => ({}));

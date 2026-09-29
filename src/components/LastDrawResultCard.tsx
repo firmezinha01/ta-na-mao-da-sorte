@@ -99,13 +99,17 @@ export const LastDrawResultCard: React.FC<LastDrawResultCardProps> = ({ lastDraw
               </div>
             </div>
           ) : (
-            <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl px-3 py-1.5">
-              <div className="flex items-center gap-1.5 text-xs font-black text-amber-300">
-                <Flame className="w-3.5 h-3.5 text-orange-400" />
+            <div className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-black text-slate-300">
                 <span>Milhar Não Comprada</span>
               </div>
+              {/* PAUSADO TEMPORARIAMENTE: Prêmio acumulou
               <p className="text-[10px] sm:text-[11px] text-amber-200/90 font-medium">
                 Prêmio acumulou para o próximo sorteio!
+              </p>
+              */}
+              <p className="text-[10px] sm:text-[11px] text-emerald-400 font-medium">
+                Novo sorteio amanhã às 19:00h (R$ 500,00)
               </p>
             </div>
           )}

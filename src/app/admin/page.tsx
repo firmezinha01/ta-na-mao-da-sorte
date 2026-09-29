@@ -845,8 +845,13 @@ export default function AdminPage() {
                       Vencedor: {sorteio.ganhador.nome_completo} ({maskPhoneNumber(sorteio.ganhador.whatsapp)})
                     </p>
                   ) : (
+                    /* PAUSADO TEMPORARIAMENTE: Prêmio acumulou
                     <p className="text-sm font-bold text-orange-400">
                       Sem vencedor hoje. Prêmio acumulou para amanhã (+ R$ 500)!
+                    </p>
+                    */
+                    <p className="text-sm font-bold text-slate-300">
+                      Sem vencedor hoje. Próximo sorteio amanhã às 19:00h com prêmio de R$ 500,00!
                     </p>
                   )}
                 </div>
@@ -899,8 +904,13 @@ export default function AdminPage() {
                 >
                   <span>🚀 Iniciar Simulação da Semana Completa (7 Sorteios a cada 5 min)</span>
                 </button>
+                {/* PAUSADO TEMPORARIAMENTE: Simulação da semana com acúmulo
                 <p className="text-[11px] text-slate-400 mt-2">
                   Executa Segunda a Sábado acumulando +R$ 500 por etapa e Domingo da Sorte girando 4 vezes e liberando o prêmio!
+                </p>
+                */}
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Executa simulação de sorteios com premiação diária de R$ 500,00 por etapa.
                 </p>
               </div>
             </div>

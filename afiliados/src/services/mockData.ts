@@ -268,12 +268,12 @@ export const INITIAL_MATERIALS: PromotionalMaterial[] = [
   },
   {
     id: 'mat_stories_01',
-    title: 'Story 1080x1920 - Prêmio Acumulado Domingo',
+    title: 'Story 1080x1920 - Sorteio Diário às 19h',
     category: 'stories',
     fileType: 'image',
     fileUrl: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=1080&q=80',
     dimensions: '1080x1920',
-    captionText: '🔥 DOMINGO DA SORTE! Sai vencedor garantido na roleta ao vivo às 19h! Compre sua milhar por apenas R$ 2,00 via Pix:',
+    captionText: '🍀 SORTEIO DIÁRIO ÀS 19H! Prêmio de R$ 500,00 no Pix! Compre sua milhar por apenas R$ 2,00:',
     isActive: true,
     createdAt: '2026-09-10T00:00:00Z'
   },
@@ -294,7 +294,7 @@ export const INITIAL_MATERIALS: PromotionalMaterial[] = [
     category: 'copy',
     fileType: 'text',
     fileUrl: '',
-    captionText: 'Fala pessoal! 🍀 Hoje tem sorteio no Tá na Mão da Sorte às 19h! Prêmio de R$ 500 ou acumulado até domingo. A milhar tá saindo por apenas R$ 2,00 no Pix.\n\nEscolham os números de vocês aqui pelo link antes das 18:50h:\n{SEU_LINK}',
+    captionText: 'Fala pessoal! 🍀 Hoje tem sorteio no Tá na Mão da Sorte às 19h! Prêmio de R$ 500,00 via Pix. A milhar tá saindo por apenas R$ 2,00.\n\nEscolham os números de vocês aqui pelo link antes das 18:50h:\n{SEU_LINK}',
     isActive: true,
     createdAt: '2026-09-15T00:00:00Z'
   },

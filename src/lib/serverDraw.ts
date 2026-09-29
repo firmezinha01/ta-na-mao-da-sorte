@@ -167,8 +167,7 @@ export class ServerDrawService {
           .from('sorteios')
           .select('*')
           .order('data_sorteio', { ascending: false })
-          .limit(1);
-
+        /* PAUSADO TEMPORARIAMENTE: Prêmio acumulado pausado para retornar em breve
         let prize = 500;
         let isAcumulado = false;
 
@@ -179,16 +178,19 @@ export class ServerDrawService {
             isAcumulado = true;
           }
         }
+        */
+        const prize = 500;
+        const isAcumulado = false;
 
-        // 3. Cria um novo sorteio agendado na nuvem
+        // 3. Cria um novo sorteio agendado na nuvem (R$ 500 diário fixo)
         const newDrawId = `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const newDrawRecord = {
           id: newDrawId,
           data_sorteio: schedule.targetIso,
           numeros_sorteados: null,
           ganhador_id: null,
-          premio: prize,
-          acumulado: isAcumulado,
+          premio: 500,
+          acumulado: false,
           status: 'agendado',
           eh_domingo: schedule.isSunday
         };
@@ -398,8 +400,12 @@ export class ServerDrawService {
       milharSorteado = rand;
       bilheteGanhador = undefined;
       ganhadorUsuario = null;
+      /* PAUSADO TEMPORARIAMENTE: Acumulação pausada para retornar em breve
       foiAcumulado = true;
       novoPremio = targetDraw.premio + 500;
+      */
+      foiAcumulado = false;
+      novoPremio = 500;
 
       // Zera bilhetes anteriores para a próxima rodada de vendas
       if (isSupabaseConfigured && supabase) {
@@ -418,8 +424,8 @@ export class ServerDrawService {
         data_sorteio: nextStepTarget.toISOString(),
         numeros_sorteados: null,
         ganhador_id: null,
-        premio: novoPremio,
-        acumulado: true,
+        premio: 500,
+        acumulado: false,
         status: 'agendado',
         eh_domingo: isNextSunday
       };
@@ -547,12 +553,16 @@ export class ServerDrawService {
           ganhadorUsuario = u || null;
         }
       } else {
+        /* PAUSADO TEMPORARIAMENTE: Prêmio acumulado pausado para retornar em breve
         foiAcumulado = true;
         novoPremio = targetDraw.premio + 500;
+        */
+        foiAcumulado = false;
+        novoPremio = 500;
       }
 
       // 🌟 REGRA DO CLIENTE:
-      // Após o sorteio (com ganhador ou acumulado), os números voltam a ser vendidos novamente!
+      // Após o sorteio, os números voltam a ser vendidos novamente!
       // A nova rodada de vendas inicia imediatamente com todos os 10.000 números disponíveis.
       if (isSupabaseConfigured && supabase) {
         try {
@@ -565,7 +575,7 @@ export class ServerDrawService {
       local.bilhetes = [];
       writeLocalDbFallback(local);
 
-      // Agenda a próxima rodada oficial para amanhã às 19:00h
+      // Agenda a próxima rodada oficial para amanhã às 19:00h (Prêmio R$ 500,00 diário fixo)
       const nextSchedule = getNextDrawSchedule(new Date(Date.now() + 60000));
       const nextId = `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       if (isSupabaseConfigured && supabase) {
@@ -576,8 +586,8 @@ export class ServerDrawService {
               data_sorteio: nextSchedule.targetIso,
               numeros_sorteados: null,
               ganhador_id: null,
-              premio: novoPremio,
-              acumulado: foiAcumulado,
+              premio: 500,
+              acumulado: false,
               status: 'agendado',
               eh_domingo: nextSchedule.isSunday
             }

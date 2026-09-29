@@ -253,7 +253,8 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
         {/* Premiação em Jogo */}
         <div className="bg-slate-950/80 rounded-xl sm:rounded-2xl p-2 sm:p-3 border border-emerald-900/60 mb-2 sm:mb-3 text-center max-w-sm sm:max-w-md mx-auto w-full">
           <span className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            {sorteio.acumulado ? 'Prêmio Acumulado em Disputa' : 'Prêmio em Disputa'}
+            {/* PAUSADO: sorteio.acumulado ? 'Prêmio Acumulado em Disputa' : 'Prêmio em Disputa' */}
+            Prêmio Diário em Disputa
           </span>
           <div className="text-xl sm:text-3xl md:text-4xl font-black text-amber-400">
             {formattedPrize}
@@ -356,16 +357,26 @@ export const DrawLiveArena: React.FC<DrawLiveArenaProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="bg-slate-950/90 border-2 border-amber-500/50 rounded-xl sm:rounded-2xl p-2.5 sm:p-4 text-center shadow-lg">
+              <div className="bg-slate-950/90 border-2 border-emerald-500/50 rounded-xl sm:rounded-2xl p-2.5 sm:p-4 text-center shadow-lg">
+                {/* PAUSADO TEMPORARIAMENTE: Badge de Acumulou
                 <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] sm:text-xs font-black uppercase mb-1">
                   <Flame className="w-3.5 h-3.5 text-orange-400" />
                   <span>ACUMULOU!</span>
                 </div>
+                */}
+                <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px] sm:text-xs font-bold uppercase mb-1">
+                  <span>SORTEIO FINALIZADO</span>
+                </div>
                 <h3 className="text-sm sm:text-base md:text-lg font-extrabold text-white">
                   Nenhum bilhete com a milhar <span className="text-amber-400 font-mono font-black">{finalMilhar || digits.join('')}</span> foi comprado hoje.
                 </h3>
+                {/* PAUSADO TEMPORARIAMENTE: Texto de Acúmulo
                 <p className="text-[11px] sm:text-xs text-slate-300 mt-1">
                   O prêmio acumulou mais <strong className="text-emerald-400">R$ 500,00</strong> para o sorteio de amanhã às 19:00h!
+                </p>
+                */}
+                <p className="text-[11px] sm:text-xs text-slate-300 mt-1">
+                  Amanhã tem mais um sorteio com <strong className="text-emerald-400">prêmio de R$ 500,00</strong> às 19:00h!
                 </p>
                 <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">
                   Os bilhetes anteriores foram zerados e todos os 10.000 números já estão liberados para novas compras.

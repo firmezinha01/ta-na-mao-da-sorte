@@ -182,7 +182,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          {/* Ajustar Prêmio Acumulado */}
+          {/* Gerenciar Prêmio Diário (Acumulado pausado temporariamente) */}
           <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800">
             <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
               Gerenciar Valor do Prêmio

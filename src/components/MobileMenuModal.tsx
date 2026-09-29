@@ -86,7 +86,8 @@ export const MobileMenuModal: React.FC<MobileMenuModalProps> = ({
             <HelpCircle className="w-5 h-5 text-amber-400 shrink-0" />
             <div>
               <span className="text-xs font-bold text-white block">Como Funciona / Regulamento</span>
-              <span className="text-[10px] text-slate-400">Regras do sorteio diário às 19h e prêmio acumulado</span>
+              {/* <span className="text-[10px] text-slate-400">Regras do sorteio diário às 19h e prêmio acumulado</span> */}
+              <span className="text-[10px] text-slate-400">Regras do sorteio diário às 19h com prêmio de R$ 500,00</span>
             </div>
           </button>
 

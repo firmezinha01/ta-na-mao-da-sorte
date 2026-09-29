@@ -388,8 +388,13 @@ export default function Home() {
               <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <h3 className="font-extrabold text-white text-sm sm:text-base mb-1">Sorteio Diário às 19:00h</h3>
+            {/* PAUSADO TEMPORARIAMENTE: Prêmio acumulado
             <p className="text-[11px] sm:text-xs text-slate-400 leading-relaxed">
               Prêmio fixo de R$ 500 ou acumulado até domingo, quando a roleta gira sucessivamente até sair um bilhete premiado!
+            </p>
+            */}
+            <p className="text-[11px] sm:text-xs text-slate-400 leading-relaxed">
+              Prêmio fixo de R$ 500,00 todos os dias às 19h! Compre seus bilhetes por apenas R$ 2,00 no Pix.
             </p>
           </div>
 

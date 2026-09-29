@@ -66,6 +66,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             </div>
           </div>
 
+          {/* PAUSADO TEMPORARIAMENTE: Regra do Prêmio Acumulado pausada para retornar em breve
           <div className="flex items-start gap-3 bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
             <Flame className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
             <div>
@@ -79,6 +80,14 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             <div>
               <strong className="text-amber-300 text-sm block">5. Domingo da Sorte (Sai ou Sai!)</strong>
               Aos domingos, se houver prêmio acumulado, a roleta gira sucessivamente até sair uma milhar efetivamente comprada por um participante! O acumulado é então pago integralmente ao vencedor e o valor é zerado.
+            </div>
+          </div>
+          */}
+          <div className="flex items-start gap-3 bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+            <Trophy className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div>
+              <strong className="text-white text-sm block">4. Premiação Diária de R$ 500,00</strong>
+              A premiação é fixa em <strong>R$ 500,00 todos os dias às 19h</strong>. Caso a milhar sorteada não tenha sido comprada por nenhum participante, uma nova rodada com todos os bilhetes disponíveis é iniciada para o próximo dia com o prêmio de R$ 500,00.
             </div>
           </div>
 

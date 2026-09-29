@@ -93,7 +93,10 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
     return () => clearInterval(interval);
   }, [serverTimeOffset, targetTimestamp, targetLabelDisplay, onAutoTriggerDraw, onOpenLiveDraw]);
 
+  /* PAUSADO TEMPORARIAMENTE: Prêmio acumulado pausado para retornar em breve
   const isAccumulated = sorteio.acumulado || sorteio.premio > 500;
+  */
+  const isAccumulated = false;
   const isSunday = sorteio.eh_domingo;
 
   return (
@@ -106,17 +109,18 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
       <div className="relative z-10 flex flex-col items-center text-center">
         
         {/* Badge de Destaque */}
+        {/* PAUSADO TEMPORARIAMENTE: Badge de Acumulado
         {isAccumulated ? (
           <div className="inline-flex items-center gap-1.5 px-3 py-0.5 sm:px-3.5 sm:py-1 rounded-full bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-500/20 text-amber-300 border border-amber-400/40 text-[10px] sm:text-xs font-black uppercase tracking-wider mb-1.5 sm:mb-2 animate-pulse">
             <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-orange-400 shrink-0" />
             <span>🔥 PRÊMIO ACUMULADO! NÃO PERCA! 🔥</span>
           </div>
-        ) : (
-          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 sm:px-3 sm:py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] sm:text-xs font-bold uppercase tracking-wider mb-1.5 sm:mb-2">
-            <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
-            <span>Sorteio Oficial Diário • Transmissão ao Vivo</span>
-          </div>
-        )}
+        ) : null}
+        */}
+        <div className="inline-flex items-center gap-1.5 px-3 py-0.5 sm:px-3 sm:py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] sm:text-xs font-bold uppercase tracking-wider mb-1.5 sm:mb-2">
+          <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+          <span>Sorteio Oficial Diário • Transmissão ao Vivo</span>
+        </div>
 
         {/* Alerta de Último Minuto (Faltando <= 60 segundos com som e pisca-pisca) */}
         {isLastMinuteAlert && (
@@ -133,19 +137,21 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
 
         {/* Título do Prêmio */}
         <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-widest text-emerald-400/90 mb-0.5">
-          {isAccumulated ? 'Grande Prêmio Acumulado de Hoje' : 'Premiação de Hoje'}
+          {/* isAccumulated ? 'Grande Prêmio Acumulado de Hoje' : 'Premiação de Hoje' */}
+          Prêmio Diário de Hoje
         </p>
 
         {/* Valor do Prêmio em destaque */}
         <div className="flex items-baseline justify-center gap-1 sm:gap-1.5 my-0.5 sm:my-1">
           <span className="text-lg sm:text-2xl lg:text-3xl font-extrabold text-emerald-400">R$</span>
           <span className="text-3xl xs:text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight bg-gradient-to-r from-amber-200 via-yellow-400 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_4px_24px_rgba(245,158,11,0.35)]">
-            {sorteio.premio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            {(sorteio.premio || 500).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </span>
         </div>
 
-        {/* Aviso de Domingo ou Regra do Acúmulo */}
+        {/* Aviso de Regras Diárias (Acúmulo pausado temporariamente) */}
         <div className="max-w-xl text-[10px] sm:text-xs text-slate-300 mb-2 sm:mb-2.5 bg-slate-900/60 backdrop-blur-sm px-3 py-1 sm:px-4 sm:py-1.5 rounded-xl border border-slate-700/50">
+          {/* PAUSADO TEMPORARIAMENTE: Aviso de acúmulo
           {isSunday ? (
             <p className="text-amber-300 font-bold flex flex-col sm:flex-row items-center justify-center gap-1">
               <span>🌟 DOMINGO DA SORTE:</span>
@@ -156,6 +162,10 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
               Sem ganhador hoje? <strong className="text-amber-300">O prêmio acumula até domingo</strong>, quando a roleta gira até sair vencedor! Milhar por <strong className="text-emerald-300">R$ 2,00</strong>.
             </p>
           )}
+          */}
+          <p>
+            Sorteios diários com <strong className="text-amber-300">prêmio de R$ 500,00</strong> todos os dias às 19h! Milhar por apenas <strong className="text-emerald-300">R$ 2,00</strong> no Pix.
+          </p>
         </div>
 
         {/* Cronômetro Regressivo Sincronizado */}

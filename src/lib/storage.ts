@@ -261,13 +261,17 @@ export class AppStore {
         novasMensagens.push(msgVencedor);
       }
     } else {
+      /* PAUSADO TEMPORARIAMENTE: Prêmio acumulado pausado para retornar em breve
       // Não houve ganhador -> Acumula R$ 500 para o próximo sorteio
       acumulou = true;
       novoPremio = sorteio.premio + 500;
+      */
+      acumulou = false;
+      novoPremio = 500;
 
       const templateAcumulado = WhatsAppTemplates.premioAcumulado({
         milhar: milharSorteado,
-        novoPremio,
+        novoPremio: 500,
         ehDomingo: isSunday
       });
 
@@ -344,8 +348,12 @@ export class AppStore {
 
     if (carryOverPrize !== undefined) {
       premioInicial = carryOverPrize;
+    /* PAUSADO TEMPORARIAMENTE: Prêmio acumulado pausado para retornar em breve
     } else if (sorteioAnterior.acumulado) {
       premioInicial = sorteioAnterior.premio;
+    */
+    } else {
+      premioInicial = 500;
     }
 
     // REGRA OFICIAL: Zera os bilhetes comprados do ciclo anterior para iniciar a nova venda

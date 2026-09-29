@@ -294,7 +294,7 @@ export const MyLinksPage: React.FC = () => {
               className="w-full bg-slate-950 border border-emerald-900/60 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
             >
               <option value="/">Página Inicial (Sorteio Diário às 19h)</option>
-              <option value="/sorteio-especial-domingo">Domingo da Sorte (Acumulado)</option>
+              {/* <option value="/sorteio-especial-domingo">Domingo da Sorte (Acumulado)</option> */}
               <option value="/comprar-milhares">Compra Direta de Milhares (R$ 2,00)</option>
             </select>
           </div>

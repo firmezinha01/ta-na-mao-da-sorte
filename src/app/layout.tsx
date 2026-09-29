@@ -22,7 +22,8 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "Tá Na Mão da SORTE | Bingo Online & Loteria Digital",
-  description: "Sorteios diários às 19h com premiação de R$ 500,00 ou acumulado até domingo. Compre milhares de 0000 a 9999 por apenas R$ 2,00 via Pix!",
+  // description: "Sorteios diários às 19h com premiação de R$ 500,00 ou acumulado até domingo. Compre milhares de 0000 a 9999 por apenas R$ 2,00 via Pix!",
+  description: "Sorteios diários às 19h com premiação de R$ 500,00 todos os dias via Pix. Compre milhares de 0000 a 9999 por apenas R$ 2,00!",
   keywords: ["bingo online", "loteria digital", "pix mercado pago", "sorteio diário", "tá na mão da sorte"],
   manifest: "/manifest.json",
   icons: {

@@ -60,12 +60,17 @@ export const WhatsAppTemplates = {
     return `🎊 *PARABÉNS, ${params.nomeCompleto.toUpperCase()}!* 🎊\n\nVocê é o grande vencedor do sorteio de hoje no *Tá Na Mão da SORTE*!\n\n🎟️ Seu bilhete premiado: *${params.milhar}*\n💰 Prêmio conquistado: *${valorFormatado}*\n\nNossa equipe entrará em contato em instantes por este número para realizar o seu PIX imediatamente! Parabéns! 🚀🍀`;
   },
 
+  /* PAUSADO TEMPORARIAMENTE: Template de Prêmio Acumulado pausado para retornar em breve
   premioAcumulado: (params: { milhar: string; novoPremio: number; ehDomingo?: boolean }) => {
     const valorFormatado = params.novoPremio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     if (params.ehDomingo) {
       return `🎲 *DOMINGO DA SORTE - Tá Na Mão da SORTE* 🍀\n\nNeste domingo a roleta gira até sair um vencedor garantido do prêmio acumulado de *${valorFormatado}*! Fique ligado no app!`;
     }
     return `🔥 *ACUMULOU! - Tá Na Mão da SORTE* 🍀\n\n🔢 Milhar sorteado: *${params.milhar}*\nNenhum participante comprou esta milhar hoje. O prêmio ACUMULOU para o sorteio de amanhã!\n\n💰 Novo prêmio: *${valorFormatado}*\n\nAproveite e garanta já o seu bilhete para amanhã às 19h!`;
+  }
+  */
+  premioAcumulado: (params: { milhar: string; novoPremio: number; ehDomingo?: boolean }) => {
+    return `🍀 *RESULTADO DO SORTEIO - Tá Na Mão da SORTE* 🍀\n\n🔢 Milhar sorteado: *${params.milhar}*\nNenhum participante comprou esta milhar hoje.\n\nAmanhã tem mais um sorteio com prêmio de *R$ 500,00* às 19:00h! Garanta já o seu bilhete por apenas R$ 2,00 via Pix!`;
   }
 };
 

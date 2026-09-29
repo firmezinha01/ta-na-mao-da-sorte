@@ -328,7 +328,7 @@ export const LandingPage: React.FC = () => {
                 </div>
                 <h3 className="text-lg font-bold text-white mb-2">Produto de R$ 2,00 Fácil de Vender</h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  O valor do bilhete é acessível para qualquer pessoa. Sorteios diários às 19:00h com prêmio de R$ 500,00 ou acumulado até domingo criam interesse contínuo de compra.
+                  O valor do bilhete é acessível para qualquer pessoa. Sorteios diários às 19:00h com prêmio de R$ 500,00 via Pix criam interesse contínuo de compra.
                 </p>
               </div>
 

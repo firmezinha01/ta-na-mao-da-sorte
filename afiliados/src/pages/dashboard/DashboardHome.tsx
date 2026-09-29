@@ -56,7 +56,7 @@ export const DashboardHome: React.FC = () => {
 
   const handleShareWhatsApp = () => {
     const text = encodeURIComponent(
-      `🍀 Olá! Conheça o Tá Na Mão da SORTE: Bingo e Loteria Digital com sorteios diários às 19h e prêmios de R$ 500 ou acumulado até domingo! Bilhetes por apenas R$ 2,00 no Pix.\n\nEscolha seus números da sorte aqui:\n${primaryLink}`
+      `🍀 Olá! Conheça o Tá Na Mão da SORTE: Bingo e Loteria Digital com sorteios diários às 19h e prêmio de R$ 500,00 via Pix! Bilhetes por apenas R$ 2,00.\n\nEscolha seus números da sorte aqui:\n${primaryLink}`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
   };

@@ -87,7 +87,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             <Trophy className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
               <strong className="text-white text-sm block">4. Premiação Diária de R$ 500,00</strong>
-              A premiação é fixa em <strong>R$ 500,00 todos os dias às 19h</strong>. Caso a milhar sorteada não tenha sido comprada por nenhum participante, uma nova rodada com todos os bilhetes disponíveis é iniciada para o próximo dia com o prêmio de R$ 500,00.
+              A premiação é fixa em <strong>R$ 500,00 todos os dias às 19h</strong>. O bilhete comprado em uma rodada é válido exclusivamente para o sorteio daquele dia e não serve para a próxima rodada caso não seja sorteado. Caso não haja ganhador, todos os bilhetes comprados são zerados e uma nova rodada com todos os 10.000 números disponíveis é iniciada para o próximo dia com o prêmio de R$ 500,00.
             </div>
           </div>
 

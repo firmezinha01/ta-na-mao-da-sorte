@@ -85,6 +85,7 @@ export class ServerDrawService {
     if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('sorteios').delete().neq('id', 'keep_none');
+        await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
       } catch (e) {
         console.warn('Erro ao limpar sorteios anteriores:', e);
       }
@@ -112,6 +113,7 @@ export class ServerDrawService {
     }
 
     const local = readLocalDbFallback();
+    local.bilhetes = [];
     local.sorteios = [step1Draw];
     writeLocalDbFallback(local);
 
@@ -241,7 +243,7 @@ export class ServerDrawService {
           .eq('status_pagamento', true);
 
         if (drawId) {
-          query = query.or(`sorteio_id.eq.${drawId},sorteio_id.eq.sorteio_hoje,sorteio_id.eq.sorteio_oficial_diario`);
+          query = query.eq('sorteio_id', drawId);
         }
 
         const { data, error } = await query;
@@ -263,7 +265,7 @@ export class ServerDrawService {
     const local = readLocalDbFallback();
     const map = new Map<string, Bilhete>();
     for (const b of (local.bilhetes || [])) {
-      if (b.status_pagamento && (!drawId || b.sorteio_id === drawId || b.sorteio_id === 'sorteio_hoje' || b.sorteio_id === 'sorteio_oficial_diario')) {
+      if (b.status_pagamento && (!drawId || b.sorteio_id === drawId)) {
         if (!map.has(b.numero_milhar)) {
           map.set(b.numero_milhar, b);
         }
@@ -371,7 +373,7 @@ export class ServerDrawService {
     const rng = createDeterministicRng(`${targetDraw.id}_${targetDraw.data_sorteio}`);
 
     // Busca bilhetes vendidos confirmados
-    const bilhetes = await this.getConfirmedTickets();
+    const bilhetes = await this.getConfirmedTickets(targetDraw.id);
     const isSunday = options?.isSunday ?? targetDraw.eh_domingo ?? false;
 
     // Verifica se este sorteio faz parte da Simulação dos 7 dias
@@ -415,6 +417,9 @@ export class ServerDrawService {
           console.warn('Erro ao zerar bilhetes no Supabase:', e);
         }
       }
+      const localSim = readLocalDbFallback();
+      localSim.bilhetes = [];
+      writeLocalDbFallback(localSim);
 
       // Agenda a próxima etapa para daqui a 5 minutos
       const nextStepTarget = new Date(Date.now() + 5 * 60 * 1000);
@@ -507,11 +512,15 @@ export class ServerDrawService {
 
       if (isSupabaseConfigured && supabase) {
         try {
+          await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
           await supabase.from('sorteios').insert([returnToNormalRecord]);
         } catch (e) {
           console.warn('Erro ao retornar ao sorteio normal no Supabase:', e);
         }
       }
+      const localSim7 = readLocalDbFallback();
+      localSim7.bilhetes = [];
+      writeLocalDbFallback(localSim7);
     } else {
       // =========================================================================
       // CASO B: OPERAÇÃO PADRÃO DIÁRIA (PRODUÇÃO)

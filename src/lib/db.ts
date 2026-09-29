@@ -253,8 +253,29 @@ export class DatabaseService {
       return { user: null, tickets: [] };
     }
 
+    const localDb = readLocalDb();
     let foundUser: Usuario | null = null;
     let tickets: Bilhete[] = [];
+
+    // Localiza o sorteio ativo oficial (bilhetes de rodadas anteriores não são exibidos)
+    let activeDrawId: string | null = null;
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: activeDraws } = await supabase
+          .from('sorteios')
+          .select('id')
+          .in('status', ['agendado', 'em_andamento'])
+          .order('data_sorteio', { ascending: true })
+          .limit(1);
+        if (activeDraws && activeDraws.length > 0 && activeDraws[0].id) {
+          activeDrawId = activeDraws[0].id;
+        }
+      } catch (e) {}
+    }
+    if (!activeDrawId) {
+      const currentLocal = localDb.sorteios.find(s => s.status === 'agendado' || s.status === 'em_andamento');
+      if (currentLocal) activeDrawId = currentLocal.id;
+    }
 
     // 1. Tenta buscar no Supabase (Fonte de Verdade Principal)
     if (isSupabaseConfigured && supabase) {
@@ -270,12 +291,17 @@ export class DatabaseService {
         }
 
         if (foundUser) {
-          const { data: tData, error: tErr } = await supabase
+          let query = supabase
             .from('bilhetes')
             .select('*, usuario:usuarios(*)')
             .eq('usuario_id', foundUser.id)
-            .eq('status_pagamento', true)
-            .order('data_compra', { ascending: false });
+            .eq('status_pagamento', true);
+
+          if (activeDrawId) {
+            query = query.eq('sorteio_id', activeDrawId);
+          }
+
+          const { data: tData, error: tErr } = await query.order('data_compra', { ascending: false });
 
           if (!tErr && tData) {
             tickets = tData as Bilhete[];
@@ -296,14 +322,15 @@ export class DatabaseService {
     }
 
     // 2. Fallback com o banco local caso Supabase falhe ou usuário só exista local
-    const localDb = readLocalDb();
     if (!foundUser) {
       foundUser = localDb.usuarios.find(u => u.cpf.replace(/\D/g, '') === cleanCpf) || null;
     }
 
     if (foundUser) {
       const localTickets = (localDb.bilhetes || []).filter(
-        b => (b.usuario_id === foundUser?.id || b.usuario?.cpf?.replace(/\D/g, '') === cleanCpf) && b.status_pagamento
+        b => (b.usuario_id === foundUser?.id || b.usuario?.cpf?.replace(/\D/g, '') === cleanCpf) &&
+             b.status_pagamento &&
+             (!activeDrawId || b.sorteio_id === activeDrawId)
       );
 
       for (const lt of localTickets) {
@@ -342,17 +369,42 @@ export class DatabaseService {
   }
 
   /**
-   * Retorna todos os bilhetes vendidos (sem duplicatas, com dados do usuário)
+   * Retorna todos os bilhetes vendidos da rodada ativa (sem duplicatas, com dados do usuário)
    */
   static async getTickets(): Promise<Bilhete[]> {
+    const localDb = readLocalDb();
+    let activeDrawId: string | null = null;
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: activeDraws } = await supabase
+          .from('sorteios')
+          .select('id')
+          .in('status', ['agendado', 'em_andamento'])
+          .order('data_sorteio', { ascending: true })
+          .limit(1);
+        if (activeDraws && activeDraws.length > 0 && activeDraws[0].id) {
+          activeDrawId = activeDraws[0].id;
+        }
+      } catch (e) {}
+    }
+    if (!activeDrawId) {
+      const currentLocal = localDb.sorteios.find(s => s.status === 'agendado' || s.status === 'em_andamento');
+      if (currentLocal) activeDrawId = currentLocal.id;
+    }
+
     // 1. Tenta buscar no Supabase como fonte única de verdade
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('bilhetes')
           .select('*, usuario:usuarios(*)')
-          .eq('status_pagamento', true)
-          .order('data_compra', { ascending: false });
+          .eq('status_pagamento', true);
+
+        if (activeDrawId) {
+          query = query.eq('sorteio_id', activeDrawId);
+        }
+
+        const { data, error } = await query.order('data_compra', { ascending: false });
 
         if (!error && data) {
           const map = new Map<string, Bilhete>();
@@ -369,10 +421,9 @@ export class DatabaseService {
     }
 
     // 2. Fallback estrito apenas se Supabase não estiver disponível
-    const localDb = readLocalDb();
     const map = new Map<string, Bilhete>();
     for (const b of (localDb.bilhetes || [])) {
-      if (b.status_pagamento && !map.has(b.numero_milhar)) {
+      if (b.status_pagamento && (!activeDrawId || b.sorteio_id === activeDrawId) && !map.has(b.numero_milhar)) {
         if (!b.usuario && b.usuario_id) {
           const u = localDb.usuarios.find(user => user.id === b.usuario_id);
           if (u) b.usuario = u;
@@ -382,6 +433,24 @@ export class DatabaseService {
     }
 
     return Array.from(map.values());
+  }
+
+  /**
+   * Zera todos os bilhetes vendidos após a conclusão de um sorteio (com ou sem ganhador),
+   * garantindo que os bilhetes comprados não sirvam para o próximo sorteio e a rodada reinicie do zero.
+   */
+  static async clearTickets(): Promise<void> {
+    const localDb = readLocalDb();
+    localDb.bilhetes = [];
+    writeLocalDb(localDb);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('bilhetes').delete().neq('id', 'none_preserve');
+      } catch (e) {
+        console.warn('Erro ao zerar bilhetes no Supabase:', e);
+      }
+    }
   }
 
   /**

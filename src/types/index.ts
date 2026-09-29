@@ -64,3 +64,54 @@ export interface AppConfig {
   whatsappApiUrl?: string;
   whatsappApiToken?: string;
 }
+
+export type AffiliateStatus = 'pendente' | 'aprovado' | 'recusado' | 'suspenso';
+export type PixKeyType = 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'RANDOM';
+
+export interface Affiliate {
+  id: string;
+  fullName: string;
+  email: string;
+  password?: string;
+  documentType: 'CPF' | 'CNPJ';
+  documentNumber: string;
+  phone: string;
+  whatsapp: string;
+  birthDate?: string;
+  city: string;
+  state: string;
+  exclusiveCode: string;
+  status: AffiliateStatus;
+  rejectionReason?: string;
+  commissionRate: number;
+  pixKeyType: PixKeyType;
+  pixKey: string;
+  socialChannels: string;
+  promotionStrategy: string;
+  balanceAvailable: number;
+  balancePending: number;
+  balancePaid: number;
+  totalClicks: number;
+  totalConversions: number;
+  termsAcceptedAt: string;
+  privacyAcceptedAt: string;
+  consentIp?: string;
+  createdAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
+}
+
+export interface AffiliateLink {
+  id: string;
+  affiliateId: string;
+  affiliateCode: string;
+  destinationPath: string;
+  campaignName: string;
+  fullUrl: string;
+  clicksCount: number;
+  conversionsCount: number;
+  revenueGenerated: number;
+  isActive: boolean;
+  createdAt: string;
+}
+

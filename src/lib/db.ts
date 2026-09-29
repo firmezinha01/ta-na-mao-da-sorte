@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Usuario, Bilhete, Sorteio, Mensagem } from '@/types';
+import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus } from '@/types';
 import { WhatsAppTemplates, sendWhatsAppMessage } from './whatsapp';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -12,6 +12,8 @@ interface DatabaseSchema {
   bilhetes: Bilhete[];
   sorteios: Sorteio[];
   mensagens: Mensagem[];
+  afiliados: Affiliate[];
+  afiliados_links: AffiliateLink[];
 }
 
 const DEFAULT_DB: DatabaseSchema = {
@@ -51,7 +53,9 @@ const DEFAULT_DB: DatabaseSchema = {
       eh_domingo: new Date().getDay() === 0
     }
   ],
-  mensagens: []
+  mensagens: [],
+  afiliados: [],
+  afiliados_links: []
 };
 
 /**
@@ -67,7 +71,10 @@ function readLocalDb(): DatabaseSchema {
       return DEFAULT_DB;
     }
     const content = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    if (!parsed.afiliados) parsed.afiliados = [];
+    if (!parsed.afiliados_links) parsed.afiliados_links = [];
+    return parsed;
   } catch (err) {
     console.error('Erro ao ler DB local:', err);
     return DEFAULT_DB;
@@ -447,5 +454,258 @@ export class DatabaseService {
 
     writeLocalDb(localDb);
     return { count: dispatchedMessages.length, messages: dispatchedMessages };
+  }
+
+  /**
+   * Salva um novo afiliado no banco de dados (Local JSON e Supabase)
+   */
+  static async saveAffiliate(affiliate: Affiliate): Promise<{ success: boolean; affiliate?: Affiliate; error?: string }> {
+    const localDb = readLocalDb();
+    const cleanEmail = affiliate.email.trim().toLowerCase();
+    const cleanDoc = affiliate.documentNumber.replace(/\D/g, '');
+
+    // Verifica duplicidade no banco local
+    if (localDb.afiliados.some(a => a.email.trim().toLowerCase() === cleanEmail)) {
+      return { success: false, error: 'Este e-mail já está cadastrado no sistema.' };
+    }
+    if (localDb.afiliados.some(a => a.documentNumber.replace(/\D/g, '') === cleanDoc)) {
+      return { success: false, error: 'Este CPF/CNPJ já possui cadastro ativo ou em análise.' };
+    }
+
+    // Salva no banco local
+    localDb.afiliados.unshift(affiliate);
+
+    // Cria link padrão
+    const defaultLink: AffiliateLink = {
+      id: `link_${Date.now()}`,
+      affiliateId: affiliate.id,
+      affiliateCode: affiliate.exclusiveCode,
+      destinationPath: '/',
+      campaignName: 'padrao',
+      fullUrl: `https://tanamaodasorte.com.br/?afiliado=${affiliate.exclusiveCode}`,
+      clicksCount: 0,
+      conversionsCount: 0,
+      revenueGenerated: 0,
+      isActive: true,
+      createdAt: new Date().toISOString()
+    };
+    localDb.afiliados_links.unshift(defaultLink);
+    writeLocalDb(localDb);
+
+    // Sincroniza com Supabase se configurado
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('afiliados').insert({
+          id: affiliate.id,
+          full_name: affiliate.fullName,
+          email: cleanEmail,
+          password: affiliate.password || '',
+          document_type: affiliate.documentType,
+          document_number: cleanDoc,
+          phone: affiliate.phone,
+          whatsapp: affiliate.whatsapp,
+          birth_date: affiliate.birthDate || null,
+          city: affiliate.city,
+          state: affiliate.state,
+          exclusive_code: affiliate.exclusiveCode,
+          status: affiliate.status,
+          rejection_reason: affiliate.rejectionReason || null,
+          commission_rate: affiliate.commissionRate,
+          pix_key_type: affiliate.pixKeyType,
+          pix_key: affiliate.pixKey,
+          social_channels: affiliate.socialChannels,
+          promotion_strategy: affiliate.promotionStrategy,
+          balance_available: affiliate.balanceAvailable,
+          balance_pending: affiliate.balancePending,
+          balance_paid: affiliate.balancePaid,
+          total_clicks: affiliate.totalClicks,
+          total_conversions: affiliate.totalConversions,
+          terms_accepted_at: affiliate.termsAcceptedAt,
+          privacy_accepted_at: affiliate.privacyAcceptedAt,
+          created_at: affiliate.createdAt
+        });
+
+        await supabase.from('afiliados_links').insert({
+          id: defaultLink.id,
+          affiliate_id: defaultLink.affiliateId,
+          affiliate_code: defaultLink.affiliateCode,
+          destination_path: defaultLink.destinationPath,
+          campaign_name: defaultLink.campaignName,
+          full_url: defaultLink.fullUrl,
+          clicks_count: 0,
+          conversions_count: 0,
+          revenue_generated: 0,
+          is_active: true,
+          created_at: defaultLink.createdAt
+        });
+      } catch (err) {
+        console.warn('Erro ao sincronizar afiliado com Supabase:', err);
+      }
+    }
+
+    return { success: true, affiliate };
+  }
+
+  /**
+   * Retorna lista de afiliados cadastrados (Supabase com fallback Local)
+   */
+  static async getAffiliates(): Promise<Affiliate[]> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('afiliados')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          return data.map((row: any) => ({
+            id: row.id,
+            fullName: row.full_name || row.fullName,
+            email: row.email,
+            password: row.password,
+            documentType: row.document_type || row.documentType,
+            documentNumber: row.document_number || row.documentNumber,
+            phone: row.phone,
+            whatsapp: row.whatsapp,
+            birthDate: row.birth_date || row.birthDate,
+            city: row.city,
+            state: row.state,
+            exclusiveCode: row.exclusive_code || row.exclusiveCode,
+            status: row.status,
+            rejectionReason: row.rejection_reason || row.rejectionReason,
+            commissionRate: Number(row.commission_rate ?? 0.15),
+            pixKeyType: row.pix_key_type || row.pixKeyType,
+            pixKey: row.pix_key || row.pixKey,
+            socialChannels: row.social_channels || row.socialChannels,
+            promotionStrategy: row.promotion_strategy || row.promotionStrategy,
+            balanceAvailable: Number(row.balance_available ?? 0),
+            balancePending: Number(row.balance_pending ?? 0),
+            balancePaid: Number(row.balance_paid ?? 0),
+            totalClicks: Number(row.total_clicks ?? 0),
+            totalConversions: Number(row.total_conversions ?? 0),
+            termsAcceptedAt: row.terms_accepted_at || row.termsAcceptedAt,
+            privacyAcceptedAt: row.privacy_accepted_at || row.privacyAcceptedAt,
+            createdAt: row.created_at || row.createdAt,
+            approvedAt: row.approved_at || row.approvedAt,
+            approvedBy: row.approved_by || row.approvedBy
+          }));
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar afiliados no Supabase:', err);
+      }
+    }
+
+    const localDb = readLocalDb();
+    return localDb.afiliados || [];
+  }
+
+  /**
+   * Busca afiliado por ID, E-mail, CPF/CNPJ ou Código Exclusivo
+   */
+  static async getAffiliateByIdOrDoc(identifier: string): Promise<Affiliate | null> {
+    const clean = identifier.trim().toLowerCase();
+    const cleanDoc = identifier.replace(/\D/g, '');
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        let query = supabase.from('afiliados').select('*');
+        if (cleanDoc.length >= 11) {
+          query = query.or(`document_number.eq.${cleanDoc},email.ilike.${clean}`);
+        } else {
+          query = query.or(`id.eq.${identifier},exclusive_code.eq.${identifier.toUpperCase()},email.ilike.${clean}`);
+        }
+
+        const { data, error } = await query.limit(1);
+        if (!error && data && data.length > 0) {
+          const row = data[0];
+          return {
+            id: row.id,
+            fullName: row.full_name || row.fullName,
+            email: row.email,
+            password: row.password,
+            documentType: row.document_type || row.documentType,
+            documentNumber: row.document_number || row.documentNumber,
+            phone: row.phone,
+            whatsapp: row.whatsapp,
+            birthDate: row.birth_date || row.birthDate,
+            city: row.city,
+            state: row.state,
+            exclusiveCode: row.exclusive_code || row.exclusiveCode,
+            status: row.status,
+            rejectionReason: row.rejection_reason || row.rejectionReason,
+            commissionRate: Number(row.commission_rate ?? 0.15),
+            pixKeyType: row.pix_key_type || row.pixKeyType,
+            pixKey: row.pix_key || row.pixKey,
+            socialChannels: row.social_channels || row.socialChannels,
+            promotionStrategy: row.promotion_strategy || row.promotionStrategy,
+            balanceAvailable: Number(row.balance_available ?? 0),
+            balancePending: Number(row.balance_pending ?? 0),
+            balancePaid: Number(row.balance_paid ?? 0),
+            totalClicks: Number(row.total_clicks ?? 0),
+            totalConversions: Number(row.total_conversions ?? 0),
+            termsAcceptedAt: row.terms_accepted_at || row.termsAcceptedAt,
+            privacyAcceptedAt: row.privacy_accepted_at || row.privacyAcceptedAt,
+            createdAt: row.created_at || row.createdAt,
+            approvedAt: row.approved_at || row.approvedAt,
+            approvedBy: row.approved_by || row.approvedBy
+          };
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar afiliado no Supabase:', err);
+      }
+    }
+
+    const localDb = readLocalDb();
+    const aff = (localDb.afiliados || []).find(a =>
+      a.id === identifier ||
+      a.email.trim().toLowerCase() === clean ||
+      a.documentNumber.replace(/\D/g, '') === cleanDoc ||
+      a.exclusiveCode.toUpperCase() === clean.toUpperCase()
+    );
+    return aff || null;
+  }
+
+  /**
+   * Atualiza status do afiliado (aprovação, recusa, suspensão)
+   */
+  static async updateAffiliateStatus(
+    id: string,
+    status: AffiliateStatus,
+    rejectionReason?: string,
+    approvedBy?: string
+  ): Promise<{ success: boolean }> {
+    const localDb = readLocalDb();
+    const idx = (localDb.afiliados || []).findIndex(a => a.id === id);
+    const nowIso = new Date().toISOString();
+
+    if (idx !== -1) {
+      localDb.afiliados[idx].status = status;
+      if (status === 'aprovado') {
+        localDb.afiliados[idx].approvedAt = nowIso;
+        localDb.afiliados[idx].approvedBy = approvedBy || 'admin';
+        localDb.afiliados[idx].rejectionReason = undefined;
+      } else if (status === 'recusado' || status === 'suspenso') {
+        localDb.afiliados[idx].rejectionReason = rejectionReason;
+      }
+      writeLocalDb(localDb);
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const updateData: any = { status };
+        if (status === 'aprovado') {
+          updateData.approved_at = nowIso;
+          updateData.approved_by = approvedBy || 'admin';
+          updateData.rejection_reason = null;
+        } else if (status === 'recusado' || status === 'suspenso') {
+          updateData.rejection_reason = rejectionReason || null;
+        }
+        await supabase.from('afiliados').update(updateData).eq('id', id);
+      } catch (err) {
+        console.warn('Erro ao atualizar status do afiliado no Supabase:', err);
+      }
+    }
+
+    return { success: true };
   }
 }

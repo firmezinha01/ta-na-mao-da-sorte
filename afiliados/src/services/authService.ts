@@ -32,8 +32,9 @@ export class AuthService {
   static async login(identifier: string, pass: string): Promise<{ success: boolean; user?: UserProfile; affiliate?: Affiliate; error?: string }> {
     const cleanId = identifier.trim().toLowerCase();
     const cleanDoc = identifier.replace(/\D/g, '');
+    const validAdminPasswords = ['sorte777', 'admin777', 'sorte2026', 'admin123'];
 
-    // 1. Check for Admin
+    // 1. Check for Admin Master
     const isAdmin = (
       cleanId === 'admin@tanamaodasorte.com.br' ||
       cleanId === 'admin' ||
@@ -41,8 +42,6 @@ export class AuthService {
     );
 
     if (isAdmin) {
-      // Senhas autorizadas para o painel administrativo de afiliados
-      const validAdminPasswords = ['sorte777', 'admin777', 'sorte2026', 'admin123'];
       if (validAdminPasswords.includes(pass.trim())) {
         const adminProfile: UserProfile = {
           uid: 'admin_master',
@@ -56,7 +55,33 @@ export class AuthService {
       return { success: false, error: 'Senha incorreta para a conta de administrador do painel de afiliados.' };
     }
 
-    // 2. Check for Affiliate
+    // 2. Tenta autenticar na API do Servidor / Banco de Dados
+    try {
+      const resp = await fetch('/api/afiliados/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password: pass })
+      });
+      const data = await resp.json();
+      if (data.success && data.user) {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
+        if (data.affiliate) {
+          const affiliates = MockDatabase.getAffiliates();
+          const idx = affiliates.findIndex(a => a.id === data.affiliate.id);
+          if (idx !== -1) affiliates[idx] = data.affiliate;
+          else affiliates.unshift(data.affiliate);
+          MockDatabase.saveAffiliates(affiliates);
+        }
+        return { success: true, user: data.user, affiliate: data.affiliate };
+      }
+      if (data.error && resp.status !== 500) {
+        return { success: false, error: data.error };
+      }
+    } catch (apiErr) {
+      console.warn('API de login indisponível, verificando cache local:', apiErr);
+    }
+
+    // 3. Fallback no banco local (cache do navegador)
     const affiliates = MockDatabase.getAffiliates();
     const aff = affiliates.find(a =>
       a.email.toLowerCase() === cleanId ||
@@ -67,7 +92,7 @@ export class AuthService {
       return { success: false, error: 'Nenhum afiliado encontrado com este e-mail ou CPF.' };
     }
 
-    if (pass.length < 6) {
+    if (aff.password && aff.password !== pass && pass.length < 6) {
       return { success: false, error: 'A senha informada está incorreta.' };
     }
 
@@ -83,23 +108,60 @@ export class AuthService {
   }
 
   /**
-   * Registers a new affiliate with validation and status "pendente".
+   * Registers a new affiliate with database persistence and status "pendente".
    */
   static async register(params: Omit<Affiliate, 'id' | 'exclusiveCode' | 'status' | 'balanceAvailable' | 'balancePending' | 'balancePaid' | 'totalClicks' | 'totalConversions' | 'createdAt'>): Promise<{ success: boolean; affiliate?: Affiliate; error?: string }> {
-    const affiliates = MockDatabase.getAffiliates();
+    // 1. Tenta salvar no Banco de Dados via API oficial
+    try {
+      const resp = await fetch('/api/afiliados/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      });
+      const data = await resp.json();
+      if (data.success && data.affiliate) {
+        const affiliates = MockDatabase.getAffiliates();
+        const existingIdx = affiliates.findIndex(a => a.id === data.affiliate.id || a.email === data.affiliate.email);
+        if (existingIdx !== -1) affiliates[existingIdx] = data.affiliate;
+        else affiliates.unshift(data.affiliate);
+        MockDatabase.saveAffiliates(affiliates);
 
-    // Check duplicate email
+        // Atualiza links locais
+        const links = MockDatabase.getLinks();
+        links.unshift({
+          id: `link_${Date.now()}`,
+          affiliateId: data.affiliate.id,
+          affiliateCode: data.affiliate.exclusiveCode,
+          destinationPath: '/',
+          campaignName: 'padrao',
+          fullUrl: `https://tanamaodasorte.com.br/?afiliado=${data.affiliate.exclusiveCode}`,
+          clicksCount: 0,
+          conversionsCount: 0,
+          revenueGenerated: 0,
+          isActive: true,
+          createdAt: new Date().toISOString()
+        });
+        MockDatabase.saveLinks(links);
+
+        return { success: true, affiliate: data.affiliate };
+      }
+      if (data.error) {
+        return { success: false, error: data.error };
+      }
+    } catch (apiErr) {
+      console.warn('API de cadastro indisponível, gravando na base local:', apiErr);
+    }
+
+    // 2. Fallback de contingência local
+    const affiliates = MockDatabase.getAffiliates();
     if (affiliates.some(a => a.email.toLowerCase() === params.email.trim().toLowerCase())) {
       return { success: false, error: 'Este e-mail já está cadastrado no sistema.' };
     }
-
-    // Check duplicate CPF/CNPJ
     const cleanDoc = params.documentNumber.replace(/\D/g, '');
     if (affiliates.some(a => a.documentNumber.replace(/\D/g, '') === cleanDoc)) {
       return { success: false, error: 'Este CPF/CNPJ já possui cadastro ativo ou em análise.' };
     }
 
-    // Generate unique code (e.g. LUCK-XXXX or name prefix)
     const prefix = params.fullName.trim().split(' ')[0].toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4) || 'LUCK';
     const randNum = Math.floor(1000 + Math.random() * 9000);
     const code = `${prefix}-${randNum}`;
@@ -121,7 +183,6 @@ export class AuthService {
     affiliates.unshift(newAffiliate);
     MockDatabase.saveAffiliates(affiliates);
 
-    // Create default link for the new affiliate
     const links = MockDatabase.getLinks();
     links.unshift({
       id: `link_${Date.now()}`,
@@ -137,19 +198,6 @@ export class AuthService {
       createdAt: new Date().toISOString()
     });
     MockDatabase.saveLinks(links);
-
-    // Create initial welcome notification
-    const notifications = MockDatabase.getNotifications();
-    notifications.unshift({
-      id: `notif_${Date.now()}`,
-      userId: newAffiliate.id,
-      title: 'Cadastro recebido com sucesso! ⏳',
-      message: 'Recebemos sua solicitação de cadastro no programa de afiliados. Seu perfil está em análise e será liberado em breve.',
-      type: 'info',
-      isRead: false,
-      createdAt: new Date().toISOString()
-    });
-    MockDatabase.saveNotifications(notifications);
 
     return { success: true, affiliate: newAffiliate };
   }

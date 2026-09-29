@@ -19,6 +19,7 @@ export interface Affiliate {
   id: string; // matches Firebase Auth UID
   fullName: string;
   email: string;
+  password?: string;
   documentType: 'CPF' | 'CNPJ';
   documentNumber: string;
   phone: string;

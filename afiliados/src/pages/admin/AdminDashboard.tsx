@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { MockDatabase } from '../../services/mockData';
 import { Card } from '../../components/common/Card';
@@ -18,7 +18,20 @@ import {
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
-  const affiliates = MockDatabase.getAffiliates();
+  const [affiliates, setAffiliates] = useState(MockDatabase.getAffiliates());
+
+  useEffect(() => {
+    fetch('/api/afiliados/list')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && d.affiliates && d.affiliates.length > 0) {
+          setAffiliates(d.affiliates);
+          MockDatabase.saveAffiliates(d.affiliates);
+        }
+      })
+      .catch(console.warn);
+  }, []);
+
   const payments = MockDatabase.getPayments();
   const commissions = MockDatabase.getCommissions();
 

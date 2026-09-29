@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MockDatabase } from '../../services/mockData';
 import { AdminService } from '../../services/adminService';
 import { Affiliate } from '../../types';
@@ -39,8 +39,22 @@ export const AdminAffiliates: React.FC = () => {
   const [actionReason, setActionReason] = useState('');
 
   const reloadAffiliates = () => {
-    setAffiliates(MockDatabase.getAffiliates());
+    fetch('/api/afiliados/list')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && d.affiliates && d.affiliates.length > 0) {
+          setAffiliates(d.affiliates);
+          MockDatabase.saveAffiliates(d.affiliates);
+        } else {
+          setAffiliates(MockDatabase.getAffiliates());
+        }
+      })
+      .catch(() => setAffiliates(MockDatabase.getAffiliates()));
   };
+
+  useEffect(() => {
+    reloadAffiliates();
+  }, []);
 
   const filtered = useMemo(() => {
     return affiliates.filter(a => {
@@ -56,6 +70,12 @@ export const AdminAffiliates: React.FC = () => {
 
   const handleApprove = (id: string) => {
     AdminService.approveAffiliate(id);
+    fetch('/api/afiliados/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ affiliateId: id, action: 'approve' })
+    }).catch(console.warn);
+
     reloadAffiliates();
     if (selectedAffiliate?.id === id) {
       setSelectedAffiliate(null);
@@ -68,8 +88,18 @@ export const AdminAffiliates: React.FC = () => {
 
     if (actionAffiliate.type === 'reject') {
       AdminService.rejectAffiliate(actionAffiliate.aff.id, actionReason);
+      fetch('/api/afiliados/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ affiliateId: actionAffiliate.aff.id, action: 'reject', rejectionReason: actionReason })
+      }).catch(console.warn);
     } else {
       AdminService.suspendAffiliate(actionAffiliate.aff.id, actionReason);
+      fetch('/api/afiliados/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ affiliateId: actionAffiliate.aff.id, action: 'suspend', rejectionReason: actionReason })
+      }).catch(console.warn);
     }
 
     reloadAffiliates();

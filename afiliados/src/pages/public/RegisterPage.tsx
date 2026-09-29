@@ -148,6 +148,7 @@ export const RegisterPage: React.FC = () => {
     const payload = {
       fullName: fullName.trim(),
       email: email.trim().toLowerCase(),
+      password,
       documentType,
       documentNumber: documentNumber.replace(/\D/g, ''),
       phone: phone.replace(/\D/g, ''),

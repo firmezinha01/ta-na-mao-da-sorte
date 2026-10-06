@@ -68,13 +68,17 @@ export const AdminAffiliates: React.FC = () => {
     });
   }, [affiliates, searchTerm, statusFilter]);
 
-  const handleApprove = (id: string) => {
+  const handleApprove = async (id: string) => {
     AdminService.approveAffiliate(id);
-    fetch('/api/afiliados/action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ affiliateId: id, action: 'approve' })
-    }).catch(console.warn);
+    try {
+      await fetch('/api/afiliados/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ affiliateId: id, action: 'approve' })
+      });
+    } catch (e) {
+      console.warn('Erro ao aprovar afiliado:', e);
+    }
 
     reloadAffiliates();
     if (selectedAffiliate?.id === id) {
@@ -82,24 +86,28 @@ export const AdminAffiliates: React.FC = () => {
     }
   };
 
-  const handleConfirmAction = (e: React.FormEvent) => {
+  const handleConfirmAction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!actionAffiliate) return;
 
-    if (actionAffiliate.type === 'reject') {
-      AdminService.rejectAffiliate(actionAffiliate.aff.id, actionReason);
-      fetch('/api/afiliados/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ affiliateId: actionAffiliate.aff.id, action: 'reject', rejectionReason: actionReason })
-      }).catch(console.warn);
-    } else {
-      AdminService.suspendAffiliate(actionAffiliate.aff.id, actionReason);
-      fetch('/api/afiliados/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ affiliateId: actionAffiliate.aff.id, action: 'suspend', rejectionReason: actionReason })
-      }).catch(console.warn);
+    try {
+      if (actionAffiliate.type === 'reject') {
+        AdminService.rejectAffiliate(actionAffiliate.aff.id, actionReason);
+        await fetch('/api/afiliados/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ affiliateId: actionAffiliate.aff.id, action: 'reject', rejectionReason: actionReason })
+        });
+      } else {
+        AdminService.suspendAffiliate(actionAffiliate.aff.id, actionReason);
+        await fetch('/api/afiliados/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ affiliateId: actionAffiliate.aff.id, action: 'suspend', rejectionReason: actionReason })
+        });
+      }
+    } catch (err) {
+      console.warn(err);
     }
 
     reloadAffiliates();
@@ -108,8 +116,17 @@ export const AdminAffiliates: React.FC = () => {
     setSelectedAffiliate(null);
   };
 
-  const handleReactivate = (id: string) => {
+  const handleReactivate = async (id: string) => {
     AdminService.reactivateAffiliate(id);
+    try {
+      await fetch('/api/afiliados/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ affiliateId: id, action: 'reactivate' })
+      });
+    } catch (err) {
+      console.warn(err);
+    }
     reloadAffiliates();
     if (selectedAffiliate?.id === id) {
       setSelectedAffiliate(null);

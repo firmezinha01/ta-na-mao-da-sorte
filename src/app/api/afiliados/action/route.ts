@@ -19,7 +19,13 @@ export async function POST(request: Request) {
     else if (action === 'suspend') status = 'suspenso';
     else if (action === 'reactivate') status = 'aprovado';
 
-    await DatabaseService.updateAffiliateStatus(affiliateId, status, rejectionReason, approvedBy);
+    const result = await DatabaseService.updateAffiliateStatus(affiliateId, status, rejectionReason, approvedBy);
+    if (!result.success) {
+      return NextResponse.json(
+        { success: false, error: result.error || 'Erro ao atualizar afiliado no banco de dados.' },
+        { status: 400 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

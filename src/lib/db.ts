@@ -867,10 +867,17 @@ export class DatabaseService {
     status: AffiliateStatus,
     rejectionReason?: string,
     approvedBy?: string
-  ): Promise<{ success: boolean }> {
+  ): Promise<{ success: boolean; error?: string }> {
     const localDb = readLocalDb();
-    const idx = (localDb.afiliados || []).findIndex(a => a.id === id);
+    const cleanId = id.trim();
     const nowIso = new Date().toISOString();
+
+    // Atualiza no banco local
+    const idx = (localDb.afiliados || []).findIndex(a =>
+      a.id === cleanId ||
+      a.email.toLowerCase() === cleanId.toLowerCase() ||
+      a.exclusiveCode.toUpperCase() === cleanId.toUpperCase()
+    );
 
     if (idx !== -1) {
       localDb.afiliados[idx].status = status;
@@ -886,17 +893,50 @@ export class DatabaseService {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const updateData: any = { status };
-        if (status === 'aprovado') {
-          updateData.approved_at = nowIso;
-          updateData.approved_by = approvedBy || 'admin';
-          updateData.rejection_reason = null;
-        } else if (status === 'recusado' || status === 'suspenso') {
-          updateData.rejection_reason = rejectionReason || null;
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+        let query = supabase.from('afiliados').select('*');
+        if (isUuid) {
+          query = query.eq('id', cleanId);
+        } else {
+          query = query.or(`exclusive_code.eq.${cleanId.toUpperCase()},email.ilike.${cleanId}`);
         }
-        await supabase.from('afiliados').update(updateData).eq('id', id);
-      } catch (err) {
-        console.warn('Erro ao atualizar status do afiliado no Supabase:', err);
+
+        const { data: rows, error: selectErr } = await query.limit(1);
+
+        if (!selectErr && rows && rows.length > 0) {
+          const current = rows[0];
+          let pwd = '';
+          if (typeof current.status === 'string' && current.status.includes('#pwd:')) {
+            pwd = current.status.split('#pwd:')[1];
+          }
+          const statusValue = pwd ? `${status}#pwd:${pwd}` : status;
+
+          // 1. Tenta atualizar com as colunas completas
+          const fullUpdateData: any = { status };
+          if (status === 'aprovado') {
+            fullUpdateData.approved_at = nowIso;
+            fullUpdateData.approved_by = approvedBy || 'admin';
+            fullUpdateData.rejection_reason = null;
+          } else if (status === 'recusado' || status === 'suspenso') {
+            fullUpdateData.rejection_reason = rejectionReason || null;
+          }
+
+          const fullRes = await supabase.from('afiliados').update(fullUpdateData).eq('id', current.id);
+          if (fullRes.error) {
+            console.warn('Atualização com colunas de auditoria falhou no Supabase, gravando status base:', fullRes.error.message);
+            // 2. Fallback caso colunas approved_at/rejection_reason não existam no Supabase
+            const baseRes = await supabase.from('afiliados').update({ status: statusValue }).eq('id', current.id);
+            if (baseRes.error) {
+              console.error('Erro ao atualizar status base no Supabase:', baseRes.error);
+              return { success: false, error: baseRes.error.message };
+            }
+          }
+        } else {
+          console.warn(`Afiliado ${cleanId} não localizado no Supabase para atualização de status.`);
+        }
+      } catch (err: any) {
+        console.error('Erro ao atualizar status do afiliado no Supabase:', err);
+        return { success: false, error: err.message || 'Erro interno no banco de dados.' };
       }
     }
 

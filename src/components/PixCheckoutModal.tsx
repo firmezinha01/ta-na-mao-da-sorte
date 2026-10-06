@@ -19,6 +19,7 @@ import confetti from 'canvas-confetti';
 import { PixPaymentData, Usuario } from '@/types';
 import { sounds } from '@/lib/sound';
 import { isSalesCutoffActive } from '@/lib/drawTime';
+import { getAffiliateTracking } from './AffiliateTracker';
 
 interface PixCheckoutModalProps {
   isOpen: boolean;
@@ -146,6 +147,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
             // Se o participante já está identificado (fluxo padrão), salva diretamente e vai para o sucesso!
             if (currentUser && currentUser.nome_completo && currentUser.cpf) {
               try {
+                const tracking = getAffiliateTracking();
                 await fetch('/api/participants', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -154,7 +156,9 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                     cpf: currentUser.cpf.replace(/\D/g, ''),
                     whatsapp: currentUser.whatsapp.replace(/\D/g, ''),
                     tickets: selectedNumbers,
-                    paymentId: pixData.paymentId
+                    paymentId: pixData.paymentId,
+                    affiliateCode: tracking?.affiliateCode,
+                    campaign: tracking?.campaign
                   })
                 });
               } catch (err) {
@@ -317,6 +321,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     setIsSavingParticipant(true);
 
     try {
+      const tracking = getAffiliateTracking();
       // Salva o participante e os bilhetes no banco de dados (Supabase / Server DB)
       const res = await fetch('/api/participants', {
         method: 'POST',
@@ -326,7 +331,9 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
           cpf: cleanCpf,
           whatsapp: cleanPhone,
           tickets: selectedNumbers,
-          paymentId: pixData?.paymentId
+          paymentId: pixData?.paymentId,
+          affiliateCode: tracking?.affiliateCode,
+          campaign: tracking?.campaign
         })
       });
 

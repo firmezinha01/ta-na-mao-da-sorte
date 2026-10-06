@@ -115,3 +115,26 @@ export interface AffiliateLink {
   createdAt: string;
 }
 
+export type CommissionStatus = 'pendente' | 'disponivel' | 'pago' | 'cancelado' | 'aprovada' | 'em_analise';
+
+export interface Commission {
+  id: string;
+  conversionId: string;
+  affiliateId: string;
+  affiliateCode?: string;
+  affiliateName?: string;
+  orderAmount: number;
+  commissionRate: number;
+  commissionAmount: number;
+  campaign?: string;
+  status: CommissionStatus;
+  cancellationReason?: string;
+  availableAt?: string;
+  paidAt?: string;
+  buyerName?: string;
+  buyerCpf?: string;
+  ticketsCount?: number;
+  tickets?: string[];
+  createdAt: string;
+}
+

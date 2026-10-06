@@ -102,6 +102,7 @@ export interface Commission {
   id: string;
   conversionId: string;
   affiliateId: string;
+  affiliateCode?: string;
   affiliateName?: string;
   orderAmount: number;
   commissionRate: number;
@@ -111,6 +112,10 @@ export interface Commission {
   cancellationReason?: string;
   availableAt?: string;
   paidAt?: string;
+  buyerName?: string;
+  buyerCpf?: string;
+  ticketsCount?: number;
+  tickets?: string[];
   createdAt: string;
 }
 

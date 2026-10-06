@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { MockDatabase } from '../../services/mockData';
@@ -42,7 +42,40 @@ export const DashboardHome: React.FC = () => {
   const [testSimMessage, setTestSimMessage] = useState<string | null>(null);
 
   const affiliate = currentAffiliate || MockDatabase.getAffiliates()[0];
-  const commissions = MockDatabase.getCommissions().filter(c => c.affiliateId === affiliate.id);
+  const [commissions, setCommissions] = useState(() =>
+    MockDatabase.getCommissions().filter(c => c.affiliateId === affiliate.id || (affiliate.exclusiveCode && c.affiliateCode === affiliate.exclusiveCode))
+  );
+
+  useEffect(() => {
+    if (affiliate?.exclusiveCode || affiliate?.id) {
+      fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode}&affiliateId=${affiliate.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            if (data.commissions) {
+               setCommissions(data.commissions);
+              const allComms = MockDatabase.getCommissions().filter(c =>
+                c.affiliateId !== affiliate.id && c.affiliateCode !== affiliate.exclusiveCode
+              );
+              MockDatabase.saveCommissions([...data.commissions, ...allComms]);
+            }
+            if (data.affiliate) {
+              const allAffs = MockDatabase.getAffiliates();
+              const idx = allAffs.findIndex(a => a.id === data.affiliate.id || a.exclusiveCode === data.affiliate.exclusiveCode);
+              if (idx !== -1) {
+                allAffs[idx] = { ...allAffs[idx], ...data.affiliate };
+              } else {
+                allAffs.unshift(data.affiliate);
+              }
+              MockDatabase.saveAffiliates(allAffs);
+              refreshAffiliate();
+            }
+          }
+        })
+        .catch(err => console.warn('Erro ao carregar comissões:', err));
+    }
+  }, [affiliate?.id, affiliate?.exclusiveCode]);
+
   const payments = MockDatabase.getPayments().filter(p => p.affiliateId === affiliate.id);
   const links = MockDatabase.getLinks().filter(l => l.affiliateId === affiliate.id);
 

@@ -27,7 +27,22 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { nome_completo, cpf, whatsapp, tickets, paymentId } = body;
+    let { nome_completo, cpf, whatsapp, tickets, paymentId, affiliateCode, campaign } = body;
+
+    // Se não veio no body, busca no cookie HTTP da requisição
+    if (!affiliateCode) {
+      try {
+        const cookieHeader = request.headers.get('cookie') || '';
+        const match = cookieHeader.match(/(?:^|;\s*)_tns_aff=([^;]+)/);
+        if (match) {
+          const cookieData = JSON.parse(decodeURIComponent(match[1]));
+          if (cookieData?.affiliateCode) {
+            affiliateCode = cookieData.affiliateCode;
+            if (!campaign && cookieData.campaign) campaign = cookieData.campaign;
+          }
+        }
+      } catch {}
+    }
 
     if (!nome_completo || !cpf || !whatsapp) {
       return NextResponse.json(
@@ -41,14 +56,17 @@ export async function POST(request: Request) {
       cpf,
       whatsapp,
       tickets: tickets || [],
-      paymentId
+      paymentId,
+      affiliateCode,
+      campaign
     });
 
     return NextResponse.json({
       success: true,
       message: 'Participante e bilhetes cadastrados com sucesso!',
       user: result.user,
-      ticketsCount: result.newTickets.length
+      ticketsCount: result.newTickets.length,
+      commission: result.commission || null
     });
   } catch (error) {
     console.error('Erro ao salvar participante:', error);

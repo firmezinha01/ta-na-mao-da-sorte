@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { MockDatabase } from '../../services/mockData';
 import { AffiliateService } from '../../services/affiliateService';
@@ -26,13 +26,30 @@ export const CommissionsPage: React.FC = () => {
   const affiliate = currentAffiliate || MockDatabase.getAffiliates()[0];
   const settings = MockDatabase.getSettings();
 
-  const [commissions, setCommissions] = useState(
-    MockDatabase.getCommissions().filter(c => c.affiliateId === affiliate.id)
+  const [commissions, setCommissions] = useState(() =>
+    MockDatabase.getCommissions().filter(c => c.affiliateId === affiliate.id || (affiliate.exclusiveCode && c.affiliateCode === affiliate.exclusiveCode))
   );
 
   const [payments, setPayments] = useState(
     MockDatabase.getPayments().filter(p => p.affiliateId === affiliate.id)
   );
+
+  useEffect(() => {
+    if (affiliate?.exclusiveCode || affiliate?.id) {
+      fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode}&affiliateId=${affiliate.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.commissions) {
+            setCommissions(data.commissions);
+            const allComms = MockDatabase.getCommissions().filter(c =>
+              c.affiliateId !== affiliate.id && c.affiliateCode !== affiliate.exclusiveCode
+            );
+            MockDatabase.saveCommissions([...data.commissions, ...allComms]);
+          }
+        })
+        .catch(console.warn);
+    }
+  }, [affiliate?.id, affiliate?.exclusiveCode]);
 
   // Payout Request Modal
   const [showPayoutModal, setShowPayoutModal] = useState(false);
@@ -44,7 +61,16 @@ export const CommissionsPage: React.FC = () => {
 
   const reloadData = () => {
     refreshAffiliate();
-    setCommissions(MockDatabase.getCommissions().filter(c => c.affiliateId === affiliate.id));
+    if (affiliate?.exclusiveCode || affiliate?.id) {
+      fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode}&affiliateId=${affiliate.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.commissions) {
+            setCommissions(data.commissions);
+          }
+        })
+        .catch(console.warn);
+    }
     setPayments(MockDatabase.getPayments().filter(p => p.affiliateId === affiliate.id));
   };
 

@@ -19,6 +19,7 @@ import {
 
 export const AdminDashboard: React.FC = () => {
   const [affiliates, setAffiliates] = useState(MockDatabase.getAffiliates());
+  const [commissions, setCommissions] = useState(MockDatabase.getCommissions());
 
   useEffect(() => {
     fetch('/api/afiliados/list')
@@ -30,10 +31,19 @@ export const AdminDashboard: React.FC = () => {
         }
       })
       .catch(console.warn);
+
+    fetch('/api/afiliados/commissions?role=admin')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && d.commissions) {
+          setCommissions(d.commissions);
+          MockDatabase.saveCommissions(d.commissions);
+        }
+      })
+      .catch(console.warn);
   }, []);
 
   const payments = MockDatabase.getPayments();
-  const commissions = MockDatabase.getCommissions();
 
   const pendingAffiliates = useMemo(() => {
     return affiliates.filter(a => a.status === 'pendente');

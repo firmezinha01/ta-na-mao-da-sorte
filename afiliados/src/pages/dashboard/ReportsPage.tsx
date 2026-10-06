@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { MockDatabase } from '../../services/mockData';
 import { Card } from '../../components/common/Card';
@@ -22,9 +22,26 @@ export const ReportsPage: React.FC = () => {
   const { currentAffiliate } = useAuth();
   const affiliateId = currentAffiliate?.id;
 
-  const commissions = useMemo(() => {
-    return MockDatabase.getCommissions().filter(c => c.affiliateId === affiliateId);
-  }, [affiliateId]);
+  const [commissions, setCommissions] = useState(() =>
+    MockDatabase.getCommissions().filter(c => c.affiliateId === affiliateId || (currentAffiliate?.exclusiveCode && c.affiliateCode === currentAffiliate.exclusiveCode))
+  );
+
+  useEffect(() => {
+    if (currentAffiliate?.exclusiveCode || currentAffiliate?.id) {
+      fetch(`/api/afiliados/commissions?affiliateCode=${currentAffiliate.exclusiveCode}&affiliateId=${currentAffiliate.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.commissions) {
+            setCommissions(data.commissions);
+            const allComms = MockDatabase.getCommissions().filter(c =>
+              c.affiliateId !== currentAffiliate.id && c.affiliateCode !== currentAffiliate.exclusiveCode
+            );
+            MockDatabase.saveCommissions([...data.commissions, ...allComms]);
+          }
+        })
+        .catch(console.warn);
+    }
+  }, [currentAffiliate?.id, currentAffiliate?.exclusiveCode]);
 
   const links = useMemo(() => {
     return MockDatabase.getLinks().filter(l => l.affiliateId === affiliateId);

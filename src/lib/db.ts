@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus } from '@/types';
+import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus, Commission } from '@/types';
 import { WhatsAppTemplates, sendWhatsAppMessage } from './whatsapp';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -15,6 +15,7 @@ interface DatabaseSchema {
   mensagens: Mensagem[];
   afiliados: Affiliate[];
   afiliados_links: AffiliateLink[];
+  comissoes: Commission[];
 }
 
 const DEFAULT_DB: DatabaseSchema = {
@@ -56,7 +57,8 @@ const DEFAULT_DB: DatabaseSchema = {
   ],
   mensagens: [],
   afiliados: [],
-  afiliados_links: []
+  afiliados_links: [],
+  comissoes: []
 };
 
 /**
@@ -75,6 +77,7 @@ function readLocalDb(): DatabaseSchema {
     const parsed = JSON.parse(content);
     if (!parsed.afiliados) parsed.afiliados = [];
     if (!parsed.afiliados_links) parsed.afiliados_links = [];
+    if (!parsed.comissoes) parsed.comissoes = [];
     return parsed;
   } catch (err) {
     console.error('Erro ao ler DB local:', err);
@@ -107,7 +110,9 @@ export class DatabaseService {
     whatsapp: string;
     tickets: string[];
     paymentId?: string;
-  }): Promise<{ user: Usuario; newTickets: Bilhete[] }> {
+    affiliateCode?: string;
+    campaign?: string;
+  }): Promise<{ user: Usuario; newTickets: Bilhete[]; commission?: Commission }> {
     const cleanCpf = params.cpf.replace(/\D/g, '');
     const cleanPhone = params.whatsapp.replace(/\D/g, '');
     const cleanName = params.nome_completo.trim();
@@ -242,7 +247,27 @@ export class DatabaseService {
       }
     }
 
-    return { user, newTickets };
+    let commission: Commission | undefined = undefined;
+    if (params.affiliateCode && newTickets.length > 0) {
+      try {
+        const saleResult = await this.recordAffiliateSale({
+          affiliateCode: params.affiliateCode,
+          orderAmount: newTickets.length * 2.00,
+          ticketsCount: newTickets.length,
+          tickets: newTickets.map(t => t.numero_milhar),
+          buyerName: user.nome_completo,
+          buyerCpf: user.cpf,
+          campaign: params.campaign
+        });
+        if (saleResult.success && saleResult.commission) {
+          commission = saleResult.commission;
+        }
+      } catch (affErr) {
+        console.error('Erro ao registrar comissão de afiliado na compra:', affErr);
+      }
+    }
+
+    return { user, newTickets, commission };
   }
 
   /**
@@ -812,7 +837,7 @@ export class DatabaseService {
             (docNumber && a.documentNumber.replace(/\D/g, '') === docNumber)
           );
 
-          return {
+          const resolvedAff: Affiliate = {
             id: row.id,
             fullName: resolvedName || localAff?.fullName || row.email.split('@')[0],
             email: row.email,
@@ -832,17 +857,24 @@ export class DatabaseService {
             pixKey: row.pix_key || localAff?.pixKey || docNumber,
             socialChannels: row.social_channels || localAff?.socialChannels || '',
             promotionStrategy: row.promotion_strategy || localAff?.promotionStrategy || '',
-            balanceAvailable: Number(row.balance_available ?? localAff?.balanceAvailable ?? 0),
-            balancePending: Number(row.balance_pending ?? localAff?.balancePending ?? 0),
-            balancePaid: Number(row.balance_paid ?? localAff?.balancePaid ?? 0),
-            totalClicks: Number(row.total_clicks ?? localAff?.totalClicks ?? 0),
-            totalConversions: Number(row.total_conversions ?? localAff?.totalConversions ?? 0),
+            balanceAvailable: Number(localAff?.balanceAvailable ?? row.balance_available ?? 0),
+            balancePending: Number(localAff?.balancePending ?? row.balance_pending ?? 0),
+            balancePaid: Number(localAff?.balancePaid ?? row.balance_paid ?? 0),
+            totalClicks: Number(localAff?.totalClicks ?? row.total_clicks ?? 0),
+            totalConversions: Number(localAff?.totalConversions ?? row.total_conversions ?? 0),
             termsAcceptedAt: row.terms_accepted_at || localAff?.termsAcceptedAt || new Date().toISOString(),
             privacyAcceptedAt: row.privacy_accepted_at || localAff?.privacyAcceptedAt || new Date().toISOString(),
             createdAt: row.created_at || localAff?.createdAt || new Date().toISOString(),
             approvedAt: row.approved_at || localAff?.approvedAt,
             approvedBy: row.approved_by || localAff?.approvedBy
           };
+
+          if (!localAff) {
+            localDb.afiliados.unshift(resolvedAff);
+            writeLocalDb(localDb);
+          }
+
+          return resolvedAff;
         }
       } catch (err) {
         console.warn('Erro ao buscar afiliado no Supabase:', err);
@@ -941,5 +973,154 @@ export class DatabaseService {
     }
 
     return { success: true };
+  }
+
+  /**
+   * Registra a venda atribuída ao afiliado, calcula comissão e atualiza saldos
+   */
+  static async recordAffiliateSale(params: {
+    affiliateCode: string;
+    orderAmount: number;
+    ticketsCount: number;
+    tickets: string[];
+    buyerName: string;
+    buyerCpf: string;
+    campaign?: string;
+  }): Promise<{ success: boolean; commission?: Commission; message?: string }> {
+    const cleanAffCode = params.affiliateCode.trim().toUpperCase();
+    const aff = await this.getAffiliateByIdOrDoc(cleanAffCode);
+
+    if (!aff) {
+      console.warn(`[Afiliados] Código ${cleanAffCode} não encontrado no banco de dados.`);
+      return { success: false, message: 'Afiliado não encontrado.' };
+    }
+
+    if (!aff.status.startsWith('aprovado')) {
+      console.warn(`[Afiliados] Afiliado ${cleanAffCode} não está aprovado (status: ${aff.status}).`);
+      return { success: false, message: 'Afiliado com conta pendente ou inativa.' };
+    }
+
+    // Regra anti-auto compra:
+    const affDoc = (aff.documentNumber || '').replace(/\D/g, '');
+    const buyerDoc = (params.buyerCpf || '').replace(/\D/g, '');
+    if (affDoc && buyerDoc && affDoc === buyerDoc) {
+      console.warn(`[Afiliados] Auto-compra detectada para o CPF ${buyerDoc}. Comissão não gerada.`);
+      return { success: false, message: 'Auto-compra detectada. Comissões para compra própria não são permitidas.' };
+    }
+
+    const rate = aff.commissionRate || 0.15;
+    const commissionValue = Number((params.orderAmount * rate).toFixed(2));
+
+    const newCommission: Commission = {
+      id: `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      conversionId: `conv_${Date.now()}`,
+      affiliateId: aff.id,
+      affiliateCode: aff.exclusiveCode,
+      affiliateName: aff.fullName,
+      orderAmount: params.orderAmount,
+      commissionRate: rate,
+      commissionAmount: commissionValue,
+      campaign: params.campaign || 'padrao',
+      status: 'pendente',
+      buyerName: params.buyerName,
+      buyerCpf: params.buyerCpf,
+      ticketsCount: params.ticketsCount,
+      tickets: params.tickets,
+      createdAt: new Date().toISOString()
+    };
+
+    const localDb = readLocalDb();
+    if (!localDb.comissoes) localDb.comissoes = [];
+    localDb.comissoes.unshift(newCommission);
+
+    // Garante presença do afiliado e atualiza saldo
+    if (!localDb.afiliados) localDb.afiliados = [];
+    const affIdx = localDb.afiliados.findIndex(a =>
+      a.id === aff.id ||
+      a.exclusiveCode.toUpperCase() === aff.exclusiveCode.toUpperCase()
+    );
+
+    if (affIdx !== -1) {
+      localDb.afiliados[affIdx].balancePending = Number(((localDb.afiliados[affIdx].balancePending || 0) + commissionValue).toFixed(2));
+      localDb.afiliados[affIdx].totalConversions = (localDb.afiliados[affIdx].totalConversions || 0) + 1;
+    } else {
+      const fullAff = { ...aff };
+      fullAff.balancePending = Number(((fullAff.balancePending || 0) + commissionValue).toFixed(2));
+      fullAff.totalConversions = (fullAff.totalConversions || 0) + 1;
+      localDb.afiliados.unshift(fullAff);
+    }
+
+    // Atualiza estatísticas do link
+    if (!localDb.afiliados_links) localDb.afiliados_links = [];
+    const linkIdx = localDb.afiliados_links.findIndex(l =>
+      l.affiliateId === aff.id || l.affiliateCode.toUpperCase() === aff.exclusiveCode.toUpperCase()
+    );
+    if (linkIdx !== -1) {
+      localDb.afiliados_links[linkIdx].conversionsCount = (localDb.afiliados_links[linkIdx].conversionsCount || 0) + 1;
+      localDb.afiliados_links[linkIdx].revenueGenerated = Number(((localDb.afiliados_links[linkIdx].revenueGenerated || 0) + params.orderAmount).toFixed(2));
+    }
+
+    writeLocalDb(localDb);
+
+    return {
+      success: true,
+      commission: newCommission,
+      message: `Comissão de R$ ${commissionValue.toFixed(2)} atribuída com sucesso ao afiliado ${aff.fullName} (${aff.exclusiveCode})!`
+    };
+  }
+
+  /**
+   * Registra clique do link de afiliado
+   */
+  static async recordAffiliateClick(affiliateCode: string, campaign?: string): Promise<{ success: boolean; totalClicks?: number }> {
+    const clean = affiliateCode.trim().toUpperCase();
+    const aff = await this.getAffiliateByIdOrDoc(clean);
+    if (!aff) return { success: false };
+
+    const localDb = readLocalDb();
+    if (!localDb.afiliados) localDb.afiliados = [];
+    const affIdx = localDb.afiliados.findIndex(a =>
+      a.id === aff.id ||
+      a.exclusiveCode.toUpperCase() === aff.exclusiveCode.toUpperCase()
+    );
+
+    let currentClicks = (aff.totalClicks || 0) + 1;
+    if (affIdx !== -1) {
+      localDb.afiliados[affIdx].totalClicks = (localDb.afiliados[affIdx].totalClicks || 0) + 1;
+      currentClicks = localDb.afiliados[affIdx].totalClicks;
+    } else {
+      const fullAff = { ...aff, totalClicks: currentClicks };
+      localDb.afiliados.unshift(fullAff);
+    }
+
+    if (localDb.afiliados_links) {
+      const lIdx = localDb.afiliados_links.findIndex(l =>
+        l.affiliateId === aff.id || l.affiliateCode.toUpperCase() === aff.exclusiveCode.toUpperCase()
+      );
+      if (lIdx !== -1) {
+        localDb.afiliados_links[lIdx].clicksCount = (localDb.afiliados_links[lIdx].clicksCount || 0) + 1;
+      }
+    }
+
+    writeLocalDb(localDb);
+    return { success: true, totalClicks: currentClicks };
+  }
+
+  /**
+   * Retorna comissões cadastradas no banco de dados
+   */
+  static async getCommissions(affiliateIdOrCode?: string): Promise<Commission[]> {
+    const localDb = readLocalDb();
+    const list = localDb.comissoes || [];
+
+    if (!affiliateIdOrCode || affiliateIdOrCode === 'all') {
+      return list;
+    }
+
+    const clean = affiliateIdOrCode.trim().toUpperCase();
+    return list.filter(c =>
+      (c.affiliateId && c.affiliateId.toUpperCase() === clean) ||
+      (c.affiliateCode && c.affiliateCode.toUpperCase() === clean)
+    );
   }
 }

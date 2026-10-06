@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus } from '@/types';
 import { WhatsAppTemplates, sendWhatsAppMessage } from './whatsapp';
@@ -533,6 +534,12 @@ export class DatabaseService {
     const cleanEmail = affiliate.email.trim().toLowerCase();
     const cleanDoc = affiliate.documentNumber.replace(/\D/g, '');
 
+    // Garante que o ID é um UUID válido para compatibilidade universal com o Supabase
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(affiliate.id || '');
+    if (!isUuid) {
+      affiliate.id = randomUUID();
+    }
+
     // Verifica duplicidade no banco local
     if (localDb.afiliados.some(a => a.email.trim().toLowerCase() === cleanEmail)) {
       return { success: false, error: 'Este e-mail já está cadastrado no sistema.' };
@@ -564,7 +571,19 @@ export class DatabaseService {
     // Sincroniza com Supabase se configurado
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('afiliados').insert({
+        // Verifica se já existe por e-mail ou documento no Supabase
+        const { data: existingRows } = await supabase
+          .from('afiliados')
+          .select('id, email, document_number')
+          .or(`document_number.eq.${cleanDoc},email.ilike.${cleanEmail}`)
+          .limit(1);
+
+        if (existingRows && existingRows.length > 0) {
+          return { success: false, error: 'Este e-mail ou CPF/CNPJ já possui cadastro no banco de dados.' };
+        }
+
+        // 1. Tenta salvar na tabela 'afiliados' com todas as colunas
+        const fullInsert = await supabase.from('afiliados').insert({
           id: affiliate.id,
           full_name: affiliate.fullName,
           email: cleanEmail,
@@ -594,21 +613,57 @@ export class DatabaseService {
           created_at: affiliate.createdAt
         });
 
-        await supabase.from('afiliados_links').insert({
-          id: defaultLink.id,
-          affiliate_id: defaultLink.affiliateId,
-          affiliate_code: defaultLink.affiliateCode,
-          destination_path: defaultLink.destinationPath,
-          campaign_name: defaultLink.campaignName,
-          full_url: defaultLink.fullUrl,
-          clicks_count: 0,
-          conversions_count: 0,
-          revenue_generated: 0,
-          is_active: true,
-          created_at: defaultLink.createdAt
-        });
+        if (fullInsert.error) {
+          console.warn('Tabela afiliados no Supabase operando com schema base. Gravando colunas essenciais:', fullInsert.error.message);
+          // Codifica a senha no campo status caso a coluna dedicada password ainda não tenha sido criada
+          const statusValue = affiliate.password ? `${affiliate.status}#pwd:${affiliate.password}` : affiliate.status;
+          const baseInsert = await supabase.from('afiliados').insert({
+            id: affiliate.id,
+            email: cleanEmail,
+            document_number: cleanDoc,
+            exclusive_code: affiliate.exclusiveCode,
+            status: statusValue
+          });
+
+          if (baseInsert.error) {
+            console.error('Erro ao inserir registro base em afiliados no Supabase:', baseInsert.error);
+          }
+        }
+
+        // 2. Salva em 'usuarios' para garantir persistência do nome, cpf e whatsapp na nuvem
+        try {
+          const { data: existingUser } = await supabase.from('usuarios').select('id').eq('cpf', cleanDoc).maybeSingle();
+          if (existingUser && existingUser.id) {
+            await supabase.from('usuarios').update({
+              nome_completo: affiliate.fullName,
+              whatsapp: affiliate.whatsapp
+            }).eq('id', existingUser.id);
+          } else {
+            await supabase.from('usuarios').insert({
+              id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              nome_completo: affiliate.fullName,
+              cpf: cleanDoc,
+              whatsapp: affiliate.whatsapp,
+              data_cadastro: affiliate.createdAt
+            });
+          }
+        } catch (uErr) {
+          console.warn('Erro ao sincronizar afiliado na tabela usuarios:', uErr);
+        }
+
+        // 3. Salva link em 'afiliados_links'
+        try {
+          const linkUid = randomUUID();
+          await supabase.from('afiliados_links').insert({
+            id: linkUid,
+            affiliate_id: affiliate.id,
+            affiliate_code: affiliate.exclusiveCode
+          });
+        } catch (lErr) {
+          console.warn('Erro ao inserir afiliados_links:', lErr);
+        }
       } catch (err) {
-        console.warn('Erro ao sincronizar afiliado com Supabase:', err);
+        console.error('Erro ao sincronizar afiliado com Supabase:', err);
       }
     }
 
@@ -621,43 +676,69 @@ export class DatabaseService {
   static async getAffiliates(): Promise<Affiliate[]> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('afiliados')
           .select('*')
           .order('created_at', { ascending: false });
 
+        if (error && error.code === '42703') {
+          // Se a coluna created_at não existir no Supabase, consulta sem ordenação por created_at
+          const fallback = await supabase.from('afiliados').select('*');
+          data = fallback.data;
+          error = fallback.error;
+        }
+
         if (!error && data && data.length > 0) {
-          return data.map((row: any) => ({
-            id: row.id,
-            fullName: row.full_name || row.fullName,
-            email: row.email,
-            password: row.password,
-            documentType: row.document_type || row.documentType,
-            documentNumber: row.document_number || row.documentNumber,
-            phone: row.phone,
-            whatsapp: row.whatsapp,
-            birthDate: row.birth_date || row.birthDate,
-            city: row.city,
-            state: row.state,
-            exclusiveCode: row.exclusive_code || row.exclusiveCode,
-            status: row.status,
-            rejectionReason: row.rejection_reason || row.rejectionReason,
-            commissionRate: Number(row.commission_rate ?? 0.15),
-            pixKeyType: row.pix_key_type || row.pixKeyType,
-            pixKey: row.pix_key || row.pixKey,
-            socialChannels: row.social_channels || row.socialChannels,
-            promotionStrategy: row.promotion_strategy || row.promotionStrategy,
-            balanceAvailable: Number(row.balance_available ?? 0),
-            balancePending: Number(row.balance_pending ?? 0),
-            balancePaid: Number(row.balance_paid ?? 0),
-            totalClicks: Number(row.total_clicks ?? 0),
-            totalConversions: Number(row.total_conversions ?? 0),
-            termsAcceptedAt: row.terms_accepted_at || row.termsAcceptedAt,
-            privacyAcceptedAt: row.privacy_accepted_at || row.privacyAcceptedAt,
-            createdAt: row.created_at || row.createdAt,
-            approvedAt: row.approved_at || row.approvedAt,
-            approvedBy: row.approved_by || row.approvedBy
-          }));
+          const localDb = readLocalDb();
+          return data
+            .filter((row: any) => row.status !== 'cancelado')
+            .map((row: any) => {
+              let statusStr: AffiliateStatus = (row.status as any) || 'pendente';
+              let extractedPassword = row.password || '';
+              if (typeof row.status === 'string' && row.status.includes('#pwd:')) {
+                const parts = row.status.split('#pwd:');
+                statusStr = parts[0] as AffiliateStatus;
+                extractedPassword = parts[1];
+              }
+
+              const localAff = (localDb.afiliados || []).find(a =>
+                a.id === row.id ||
+                a.email.toLowerCase() === row.email.toLowerCase() ||
+                (row.document_number && a.documentNumber.replace(/\D/g, '') === row.document_number)
+              );
+
+              return {
+                id: row.id,
+                fullName: row.full_name || row.fullName || localAff?.fullName || row.email.split('@')[0],
+                email: row.email,
+                password: extractedPassword || localAff?.password || '',
+                documentType: row.document_type || localAff?.documentType || 'CPF',
+                documentNumber: row.document_number || row.documentNumber || localAff?.documentNumber || '',
+                phone: row.phone || localAff?.phone || '',
+                whatsapp: row.whatsapp || localAff?.whatsapp || '',
+                birthDate: row.birth_date || localAff?.birthDate,
+                city: row.city || localAff?.city || '',
+                state: row.state || localAff?.state || '',
+                exclusiveCode: row.exclusive_code || localAff?.exclusiveCode || 'LUCK-7777',
+                status: statusStr,
+                rejectionReason: row.rejection_reason || localAff?.rejectionReason,
+                commissionRate: Number(row.commission_rate ?? localAff?.commissionRate ?? 0.15),
+                pixKeyType: row.pix_key_type || localAff?.pixKeyType || 'CPF',
+                pixKey: row.pix_key || localAff?.pixKey || row.document_number,
+                socialChannels: row.social_channels || localAff?.socialChannels || '',
+                promotionStrategy: row.promotion_strategy || localAff?.promotionStrategy || '',
+                balanceAvailable: Number(row.balance_available ?? localAff?.balanceAvailable ?? 0),
+                balancePending: Number(row.balance_pending ?? localAff?.balancePending ?? 0),
+                balancePaid: Number(row.balance_paid ?? localAff?.balancePaid ?? 0),
+                totalClicks: Number(row.total_clicks ?? localAff?.totalClicks ?? 0),
+                totalConversions: Number(row.total_conversions ?? localAff?.totalConversions ?? 0),
+                termsAcceptedAt: row.terms_accepted_at || localAff?.termsAcceptedAt || new Date().toISOString(),
+                privacyAcceptedAt: row.privacy_accepted_at || localAff?.privacyAcceptedAt || new Date().toISOString(),
+                createdAt: row.created_at || localAff?.createdAt || new Date().toISOString(),
+                approvedAt: row.approved_at || localAff?.approvedAt,
+                approvedBy: row.approved_by || localAff?.approvedBy
+              };
+            });
         }
       } catch (err) {
         console.warn('Erro ao consultar afiliados no Supabase:', err);
@@ -674,49 +755,93 @@ export class DatabaseService {
   static async getAffiliateByIdOrDoc(identifier: string): Promise<Affiliate | null> {
     const clean = identifier.trim().toLowerCase();
     const cleanDoc = identifier.replace(/\D/g, '');
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier.trim());
 
     if (isSupabaseConfigured && supabase) {
       try {
         let query = supabase.from('afiliados').select('*');
         if (cleanDoc.length >= 11) {
           query = query.or(`document_number.eq.${cleanDoc},email.ilike.${clean}`);
+        } else if (isUuid) {
+          query = query.or(`id.eq.${identifier},email.ilike.${clean}`);
         } else {
-          query = query.or(`id.eq.${identifier},exclusive_code.eq.${identifier.toUpperCase()},email.ilike.${clean}`);
+          query = query.or(`email.ilike.${clean},exclusive_code.eq.${identifier.toUpperCase()}`);
         }
 
         const { data, error } = await query.limit(1);
         if (!error && data && data.length > 0) {
           const row = data[0];
+
+          // Extrai status limpo e senha se foi codificada no status
+          let statusStr: AffiliateStatus = (row.status as any) || 'pendente';
+          let extractedPassword = row.password || '';
+          if (typeof row.status === 'string' && row.status.includes('#pwd:')) {
+            const parts = row.status.split('#pwd:');
+            statusStr = parts[0] as AffiliateStatus;
+            if (!extractedPassword) {
+              extractedPassword = parts[1];
+            }
+          }
+
+          // Busca dados complementares em 'usuarios' caso faltem na tabela base
+          let resolvedName = row.full_name || row.fullName || '';
+          let resolvedPhone = row.phone || '';
+          let resolvedWhatsapp = row.whatsapp || '';
+
+          const docNumber = row.document_number || row.documentNumber || cleanDoc;
+          if (docNumber) {
+            try {
+              const { data: userRow } = await supabase
+                .from('usuarios')
+                .select('*')
+                .eq('cpf', docNumber)
+                .maybeSingle();
+              if (userRow) {
+                if (!resolvedName) resolvedName = userRow.nome_completo || '';
+                if (!resolvedWhatsapp) resolvedWhatsapp = userRow.whatsapp || '';
+                if (!resolvedPhone) resolvedPhone = userRow.whatsapp || '';
+              }
+            } catch {}
+          }
+
+          // Complementa com o banco local se existir
+          const localDb = readLocalDb();
+          const localAff = (localDb.afiliados || []).find(a =>
+            a.id === row.id ||
+            a.email.toLowerCase() === row.email.toLowerCase() ||
+            (docNumber && a.documentNumber.replace(/\D/g, '') === docNumber)
+          );
+
           return {
             id: row.id,
-            fullName: row.full_name || row.fullName,
+            fullName: resolvedName || localAff?.fullName || row.email.split('@')[0],
             email: row.email,
-            password: row.password,
-            documentType: row.document_type || row.documentType,
-            documentNumber: row.document_number || row.documentNumber,
-            phone: row.phone,
-            whatsapp: row.whatsapp,
-            birthDate: row.birth_date || row.birthDate,
-            city: row.city,
-            state: row.state,
-            exclusiveCode: row.exclusive_code || row.exclusiveCode,
-            status: row.status,
-            rejectionReason: row.rejection_reason || row.rejectionReason,
-            commissionRate: Number(row.commission_rate ?? 0.15),
-            pixKeyType: row.pix_key_type || row.pixKeyType,
-            pixKey: row.pix_key || row.pixKey,
-            socialChannels: row.social_channels || row.socialChannels,
-            promotionStrategy: row.promotion_strategy || row.promotionStrategy,
-            balanceAvailable: Number(row.balance_available ?? 0),
-            balancePending: Number(row.balance_pending ?? 0),
-            balancePaid: Number(row.balance_paid ?? 0),
-            totalClicks: Number(row.total_clicks ?? 0),
-            totalConversions: Number(row.total_conversions ?? 0),
-            termsAcceptedAt: row.terms_accepted_at || row.termsAcceptedAt,
-            privacyAcceptedAt: row.privacy_accepted_at || row.privacyAcceptedAt,
-            createdAt: row.created_at || row.createdAt,
-            approvedAt: row.approved_at || row.approvedAt,
-            approvedBy: row.approved_by || row.approvedBy
+            password: extractedPassword || localAff?.password || '',
+            documentType: row.document_type || localAff?.documentType || 'CPF',
+            documentNumber: docNumber,
+            phone: resolvedPhone || localAff?.phone || '',
+            whatsapp: resolvedWhatsapp || localAff?.whatsapp || '',
+            birthDate: row.birth_date || localAff?.birthDate,
+            city: row.city || localAff?.city || '',
+            state: row.state || localAff?.state || '',
+            exclusiveCode: row.exclusive_code || localAff?.exclusiveCode || 'LUCK-7777',
+            status: statusStr,
+            rejectionReason: row.rejection_reason || localAff?.rejectionReason,
+            commissionRate: Number(row.commission_rate ?? localAff?.commissionRate ?? 0.15),
+            pixKeyType: row.pix_key_type || localAff?.pixKeyType || 'CPF',
+            pixKey: row.pix_key || localAff?.pixKey || docNumber,
+            socialChannels: row.social_channels || localAff?.socialChannels || '',
+            promotionStrategy: row.promotion_strategy || localAff?.promotionStrategy || '',
+            balanceAvailable: Number(row.balance_available ?? localAff?.balanceAvailable ?? 0),
+            balancePending: Number(row.balance_pending ?? localAff?.balancePending ?? 0),
+            balancePaid: Number(row.balance_paid ?? localAff?.balancePaid ?? 0),
+            totalClicks: Number(row.total_clicks ?? localAff?.totalClicks ?? 0),
+            totalConversions: Number(row.total_conversions ?? localAff?.totalConversions ?? 0),
+            termsAcceptedAt: row.terms_accepted_at || localAff?.termsAcceptedAt || new Date().toISOString(),
+            privacyAcceptedAt: row.privacy_accepted_at || localAff?.privacyAcceptedAt || new Date().toISOString(),
+            createdAt: row.created_at || localAff?.createdAt || new Date().toISOString(),
+            approvedAt: row.approved_at || localAff?.approvedAt,
+            approvedBy: row.approved_by || localAff?.approvedBy
           };
         }
       } catch (err) {

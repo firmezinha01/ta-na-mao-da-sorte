@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import { DatabaseService } from '@/lib/db';
 import { Affiliate } from '@/types';
 
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
     const code = `${prefix}-${randNum}`;
 
     const newAffiliate: Affiliate = {
-      id: `aff_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: randomUUID(),
       fullName: fullName.trim(),
       email: cleanEmail,
       password: password || '',

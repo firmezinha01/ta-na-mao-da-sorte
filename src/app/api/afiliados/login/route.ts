@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     }
 
     // Valida senha se cadastrada
-    if (aff.password && aff.password !== pass && pass.length < 6) {
+    if (aff.password && aff.password !== pass) {
       return NextResponse.json(
         { success: false, error: 'Senha incorreta.' },
         { status: 401 }

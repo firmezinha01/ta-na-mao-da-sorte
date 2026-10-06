@@ -3,8 +3,12 @@
 -- Script PostgreSQL para execução no Supabase SQL Editor
 -- ========================================================
 
+-- Remove tabelas existentes para recriar com todas as 28 colunas
+DROP TABLE IF EXISTS public.afiliados_links CASCADE;
+DROP TABLE IF EXISTS public.afiliados CASCADE;
+
 -- 1. Tabela public.afiliados
-CREATE TABLE IF NOT EXISTS public.afiliados (
+CREATE TABLE public.afiliados (
     id TEXT PRIMARY KEY,
     full_name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,

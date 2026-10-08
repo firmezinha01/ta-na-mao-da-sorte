@@ -8,13 +8,14 @@ import {
   Check, 
   X, 
   Lock, 
-  ChevronLeft, 
-  ChevronRight, 
   ShoppingCart,
-  Filter,
-  RefreshCw,
   Clock,
-  UserCheck
+  UserCheck,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  Trash2,
+  Ticket
 } from 'lucide-react';
 import { Bilhete, Usuario } from '@/types';
 import { sounds } from '@/lib/sound';
@@ -32,8 +33,6 @@ interface TicketGridProps {
   onClearSelection: () => void;
   onCheckout: () => void;
 }
-
-const PAGE_SIZE = 100; // 100 números por página para máxima velocidade e fluidez visual
 
 export const TicketGrid: React.FC<TicketGridProps> = ({
   soldTickets,
@@ -57,11 +56,8 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Estado de busca e navegação
+  // Campo de busca da milhar desejada (ex: 1234)
   const [searchTerm, setSearchTerm] = useState('');
-  const [groupIndex, setGroupIndex] = useState(0); // 0 a 9 (grupos de 1.000: 0000-0999, 1000-1999, etc.)
-  const [pageIndex, setPageIndex] = useState(0); // Páginas de 100 dentro do grupo (0 a 9)
-  const [filterType, setFilterType] = useState<'all' | 'available' | 'my' | 'sold'>('all');
 
   // Mapeamentos em Map / Set para consulta O(1) instantânea
   const soldSet = useMemo(() => {
@@ -79,66 +75,6 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
   const selectedSet = useMemo(() => {
     return new Set(selectedNumbers);
   }, [selectedNumbers]);
-
-  // Lista de grupos de 1.000 (0000-0999, 1000-1999, etc.)
-  const groups = [
-    { label: '0000 - 0999', start: 0, end: 999 },
-    { label: '1000 - 1999', start: 1000, end: 1999 },
-    { label: '2000 - 2999', start: 2000, end: 2999 },
-    { label: '3000 - 3999', start: 3000, end: 3999 },
-    { label: '4000 - 4999', start: 4000, end: 4999 },
-    { label: '5000 - 5999', start: 5000, end: 5999 },
-    { label: '6000 - 6999', start: 6000, end: 6999 },
-    { label: '7000 - 7999', start: 7000, end: 7999 },
-    { label: '8000 - 8999', start: 8000, end: 8999 },
-    { label: '9000 - 9999', start: 9000, end: 9999 },
-  ];
-
-  // Cálculo dos números visíveis baseado em busca e filtros
-  const visibleNumbers = useMemo(() => {
-    const cleanSearch = searchTerm.trim();
-
-    // Se o usuário digitou uma busca específica
-    if (cleanSearch) {
-      const results: string[] = [];
-      for (let i = 0; i < 10000; i++) {
-        const numStr = i.toString().padStart(4, '0');
-        if (numStr.includes(cleanSearch)) {
-          const isSold = soldSet.has(numStr);
-          const isReserved = reservedSet.has(numStr);
-          const isMy = mySet.has(numStr);
-
-          if (filterType === 'available' && (isSold || isReserved)) continue;
-          if (filterType === 'my' && !isMy) continue;
-          if (filterType === 'sold' && !isSold) continue;
-
-          results.push(numStr);
-          if (results.length >= 200) break; // Limite de visualização na busca para não travar
-        }
-      }
-      return results;
-    }
-
-    // Navegação padrão por Grupos de 1.000 e Páginas de 100
-    const startRange = groupIndex * 1000 + pageIndex * PAGE_SIZE;
-    const endRange = startRange + PAGE_SIZE;
-
-    const results: string[] = [];
-    for (let i = startRange; i < endRange && i < 10000; i++) {
-      const numStr = i.toString().padStart(4, '0');
-      const isSold = soldSet.has(numStr);
-      const isReserved = reservedSet.has(numStr);
-      const isMy = mySet.has(numStr);
-
-      if (filterType === 'available' && (isSold || isReserved)) continue;
-      if (filterType === 'my' && !isMy) continue;
-      if (filterType === 'sold' && !isSold) continue;
-
-      results.push(numStr);
-    }
-
-    return results;
-  }, [searchTerm, groupIndex, pageIndex, filterType, soldSet, reservedSet, mySet]);
 
   // Função Surpresinha (Gerador da Sorte de milhares aleatórios não vendidos e não reservados)
   const handleSurpresinha = (quantity: number) => {
@@ -183,336 +119,399 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
 
   const totalAmount = selectedNumbers.length * 2.00;
 
+  // Análise da milhar digitada no campo de busca
+  const cleanSearch = searchTerm.trim().replace(/\D/g, '').slice(0, 4);
+  const isCompleteMilhar = cleanSearch.length === 4;
+
+  const isSold = isCompleteMilhar && soldSet.has(cleanSearch);
+  const isReserved = isCompleteMilhar && reservedSet.has(cleanSearch) && !isSold;
+  const isMy = isCompleteMilhar && mySet.has(cleanSearch);
+  const isSelected = isCompleteMilhar && selectedSet.has(cleanSearch);
+  const isAvailable = isCompleteMilhar && !isSold && !isReserved;
+
   return (
     <section id="ticket-grid-section" className="w-full my-6 sm:my-8 scroll-mt-20 sm:scroll-mt-24 pb-20 sm:pb-8">
       
       {/* Aviso quando o usuário ainda não entrou */}
       {!currentUser && (
-        <div className="mb-4 p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/90 border border-emerald-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg shadow-emerald-950/50">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
-              <UserCheck className="w-5 h-5 stroke-[2.5]" />
+        <div className="mb-4 sm:mb-6 p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/90 border-2 border-emerald-500/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xl shadow-emerald-950/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/40">
+              <UserCheck className="w-6 h-6 stroke-[2.5]" />
             </div>
             <div>
-              <p className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5">
+              <p className="text-sm sm:text-base font-black text-white flex items-center gap-1.5">
                 <span>Identificação Obrigatória para Escolher Números</span>
               </p>
-              <p className="text-[11px] text-slate-300">
-                Preencha seu <strong>Nome, CPF e WhatsApp</strong> para liberar a escolha das milhares e garantir seu prêmio.
+              <p className="text-xs text-slate-300">
+                Preencha seu <strong>Nome, CPF e WhatsApp</strong> para liberar a escolha das milhares e garantir seu prêmio de R$ 500,00.
               </p>
             </div>
           </div>
           <button
             onClick={() => onRequireLogin('Informe seus dados para poder selecionar suas milhares da sorte.')}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 hover:from-emerald-300 hover:to-green-400 text-slate-950 font-black text-xs transition-all shadow-md shrink-0 cursor-pointer text-center"
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 hover:from-emerald-300 hover:to-green-400 text-slate-950 font-black text-xs sm:text-sm transition-all shadow-md shrink-0 cursor-pointer text-center"
           >
             Entrar / Preencher Dados →
           </button>
         </div>
       )}
 
-      {/* Cabeçalho da Seção */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
-        <div>
-          <div className="flex items-center gap-1.5 text-emerald-400 text-xs sm:text-sm font-bold uppercase tracking-wider">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Bilhetes Disponíveis de 0000 a 9999</span>
-          </div>
-          <h2 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Escolha suas Milhares da Sorte
-          </h2>
-          <p className="text-[11px] sm:text-sm text-slate-400 mt-0.5 sm:mt-1">
-            Toque no número desejado para reservar e pagar via Pix. R$ 2,00 por milhar.
-          </p>
-        </div>
-
-        {/* Gerador Surpresinha */}
-        <div className="flex items-center justify-between sm:justify-start gap-1.5 sm:gap-2 bg-slate-900/90 border border-emerald-800/40 p-1.5 sm:p-2 rounded-2xl w-full md:w-auto">
-          <div className="flex items-center gap-1 px-1.5 text-xs font-semibold text-emerald-300">
-            <Dices className="w-4 h-4 text-amber-400" />
-            <span>Surpresinha:</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => handleSurpresinha(1)}
-              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-950 hover:bg-emerald-800 text-emerald-300 border border-emerald-700/50 transition-colors"
-              title="Escolher 1 número aleatório"
-            >
-              +1
-            </button>
-            <button
-              onClick={() => handleSurpresinha(3)}
-              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-950 hover:bg-emerald-800 text-emerald-300 border border-emerald-700/50 transition-colors"
-              title="Escolher 3 números aleatórios"
-            >
-              +3
-            </button>
-            <button
-              onClick={() => handleSurpresinha(5)}
-              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-950 hover:bg-emerald-800 text-emerald-300 border border-emerald-700/50 transition-colors"
-              title="Escolher 5 números aleatórios"
-            >
-              +5
-            </button>
-            <button
-              onClick={() => handleSurpresinha(10)}
-              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-gradient-to-r from-emerald-600 to-amber-600 hover:from-emerald-500 hover:to-amber-500 text-white shadow-sm transition-all"
-              title="Escolher 10 números aleatórios"
-            >
-              +10
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Aviso de Vendas Encerradas das 18:55 às 19:05 */}
       {isCutoff && (
-        <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3.5 sm:p-4 mb-4 flex items-center gap-3 text-amber-300 text-xs sm:text-sm animate-pulse">
-          <Clock className="w-5 h-5 shrink-0 text-amber-400" />
+        <div className="bg-amber-500/15 border-2 border-amber-500/50 rounded-3xl p-4 sm:p-5 mb-5 flex items-center gap-3.5 text-amber-300 text-xs sm:text-sm animate-pulse shadow-xl">
+          <Clock className="w-6 h-6 shrink-0 text-amber-400" />
           <div>
-            <strong className="block text-white font-bold">Vendas encerradas para o sorteio de hoje (às 18:55h)</strong>
-            <span>O sorteio oficial acontece às 19:00h! A nova rodada de vendas abrirá logo após a apuração.</span>
+            <strong className="block text-white font-bold text-sm sm:text-base">Vendas encerradas para o sorteio de hoje (às 18:55h)</strong>
+            <span>O sorteio oficial acontece às 19:00h! A nova rodada de vendas abrirá logo após a apuração com o prêmio de R$ 500,00.</span>
           </div>
         </div>
       )}
 
-      {/* Barra de Filtros e Busca */}
-      <div className="bg-slate-900/70 border border-emerald-900/40 rounded-2xl p-3 sm:p-4 mb-4 sm:mb-5 backdrop-blur-sm">
-        <div className="flex flex-col sm:flex-row items-center gap-2.5 sm:gap-3">
+      {/* CARD PRINCIPAL SUPER DESTACADO: BUSCAR MILHAR */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 border-2 sm:border-3 border-emerald-400/80 shadow-[0_0_40px_rgba(16,185,129,0.25)] p-5 sm:p-8 mb-6">
+        
+        {/* Glow decorativo de fundo */}
+        <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col items-center text-center">
           
-          {/* Campo de Busca Rápida */}
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400/70" />
-            <input
-              type="text"
-              placeholder="Buscar milhar (ex: 1234)"
-              maxLength={4}
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value.replace(/\D/g, ''));
-                setPageIndex(0);
-              }}
-              className="w-full pl-10 pr-8 py-2.5 bg-slate-950 border border-emerald-900/60 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 transition-colors font-mono"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+          {/* Badge de Destaque */}
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 text-xs sm:text-sm font-black uppercase tracking-wider mb-2 sm:mb-3 shadow-md">
+            <Sparkles className="w-4 h-4 text-emerald-400" />
+            <span>🎯 ESCOLHA SEU NÚMERO DA SORTE (0000 A 9999)</span>
           </div>
 
-          {/* Abas de Filtro de Status */}
-          <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-            <button
-              onClick={() => setFilterType('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
-                filterType === 'all'
-                  ? 'bg-emerald-500 text-slate-950 font-bold'
-                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Todos
-            </button>
-            <button
-              onClick={() => setFilterType('available')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
-                filterType === 'available'
-                  ? 'bg-emerald-500 text-slate-950 font-bold'
-                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Disponíveis
-            </button>
-            <button
-              onClick={() => setFilterType('my')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
-                filterType === 'my'
-                  ? 'bg-cyan-500 text-slate-950 font-bold'
-                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Meus ({myTickets.length})
-            </button>
-            <button
-              onClick={() => setFilterType('sold')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
-                filterType === 'sold'
-                  ? 'bg-amber-600 text-white font-bold'
-                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Vendidos
-            </button>
+          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight mb-1 sm:mb-2">
+            Buscar Milhar Desejada
+          </h2>
+
+          <p className="text-xs sm:text-sm text-slate-300 max-w-xl mb-5 sm:mb-6">
+            Digite abaixo os <strong>4 dígitos da milhar</strong> que você quer concorrer (ex: <strong>1234</strong>, <strong>0582</strong>, <strong>7777</strong>). O sistema informa instantaneamente se ela está <strong>disponível</strong> ou <strong>indisponível</strong>.
+          </p>
+
+          {/* CAMPO DE DIGITAÇÃO SUPER DESTACADO */}
+          <div className="w-full max-w-md bg-slate-950/90 rounded-3xl p-4 sm:p-6 border-2 border-emerald-500/70 shadow-2xl shadow-emerald-950/80 mb-5">
+            <label className="block text-xs sm:text-sm font-black text-amber-300 uppercase tracking-wider mb-2.5">
+              👇 DIGITE SUA MILHAR AQUI (4 DÍGITOS):
+            </label>
+
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="Ex: 1234"
+                className="w-full text-center text-4xl sm:text-6xl font-mono font-black tracking-[0.35em] sm:tracking-[0.45em] py-4 sm:py-5 px-4 bg-slate-900 border-2 sm:border-3 border-emerald-400 rounded-2xl text-amber-300 placeholder-slate-700 focus:outline-none focus:border-amber-300 focus:ring-4 focus:ring-emerald-500/30 transition-all shadow-inner"
+                autoFocus={false}
+              />
+
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                  title="Limpar número"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Visualizador dos 4 Dígitos */}
+            <div className="grid grid-cols-4 gap-2 sm:gap-3 mt-3">
+              {[0, 1, 2, 3].map((idx) => {
+                const char = cleanSearch[idx];
+                return (
+                  <div
+                    key={idx}
+                    className={`py-2 rounded-xl border font-mono font-black text-lg sm:text-2xl text-center transition-all ${
+                      char
+                        ? 'bg-emerald-950/80 border-emerald-400 text-emerald-300 shadow-sm'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-600'
+                    }`}
+                  >
+                    {char || '•'}
+                  </div>
+                );
+              })}
+            </div>
+
           </div>
 
-          {/* Indicador de Legenda Visual em telas grandes */}
-          <div className="hidden lg:flex items-center gap-3 ml-auto text-xs text-slate-400">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-slate-950 border border-emerald-600" />
-              <span>Livre</span>
+          {/* PAINEL DE STATUS DA MILHAR DIGITADA */}
+          {isCompleteMilhar ? (
+            <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+              
+              {/* CASO 1: INDISPONÍVEL (JÁ VENDIDA) */}
+              {isSold && (
+                <div className="bg-red-950/70 border-2 border-red-500/80 rounded-2xl p-4 sm:p-5 text-center space-y-2 shadow-xl shadow-red-950/50">
+                  <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 mx-auto flex items-center justify-center border border-red-500/40">
+                    <Lock className="w-6 h-6 stroke-[2.5]" />
+                  </div>
+                  <div className="font-mono text-2xl sm:text-3xl font-black text-white">
+                    Milhar {cleanSearch}
+                  </div>
+                  <div className="inline-block px-3 py-1 rounded-full bg-red-600 text-white font-black text-xs uppercase tracking-wider">
+                    ❌ INDISPONÍVEL (JÁ VENDIDA)
+                  </div>
+                  <p className="text-xs text-red-200 leading-relaxed">
+                    Esta milhar já foi comprada por outro participante para o sorteio de hoje às 19:00h.
+                  </p>
+                  <p className="text-[11px] text-red-300 font-semibold pt-1">
+                    💡 Digite outro número da sua sorte acima ou use a Surpresinha abaixo!
+                  </p>
+                </div>
+              )}
+
+              {/* CASO 2: INDISPONÍVEL (RESERVADA NO PIX) */}
+              {isReserved && (
+                <div className="bg-amber-950/70 border-2 border-amber-500/80 rounded-2xl p-4 sm:p-5 text-center space-y-2 shadow-xl shadow-amber-950/50">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 mx-auto flex items-center justify-center border border-amber-500/40">
+                    <Clock className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div className="font-mono text-2xl sm:text-3xl font-black text-white">
+                    Milhar {cleanSearch}
+                  </div>
+                  <div className="inline-block px-3 py-1 rounded-full bg-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider">
+                    ⏳ RESERVADA (AGUARDANDO PIX)
+                  </div>
+                  <p className="text-xs text-amber-200 leading-relaxed">
+                    Esta milhar está temporariamente reservada no Pix por outro participante (validade de 15 minutos).
+                  </p>
+                  <p className="text-[11px] text-amber-300 font-semibold pt-1">
+                    Se o pagamento não for realizado, ela será liberada novamente. Enquanto isso, escolha outro número!
+                  </p>
+                </div>
+              )}
+
+              {/* CASO 3: JÁ COMPRADA PELO PRÓPRIO PARTICIPANTE */}
+              {isMy && (
+                <div className="bg-cyan-950/70 border-2 border-cyan-400 rounded-2xl p-4 sm:p-5 text-center space-y-2 shadow-xl shadow-cyan-950/50">
+                  <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-300 mx-auto flex items-center justify-center border border-cyan-500/40">
+                    <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
+                  </div>
+                  <div className="font-mono text-2xl sm:text-3xl font-black text-white">
+                    Milhar {cleanSearch}
+                  </div>
+                  <div className="inline-block px-3 py-1 rounded-full bg-cyan-500 text-slate-950 font-black text-xs uppercase tracking-wider">
+                    🍀 ESTA MILHAR JÁ É SUA!
+                  </div>
+                  <p className="text-xs text-cyan-200 leading-relaxed">
+                    Você já comprou e garantiu esta milhar para concorrer ao prêmio de R$ 500,00 de hoje às 19:00h!
+                  </p>
+                </div>
+              )}
+
+              {/* CASO 4: DISPONÍVEL PARA COMPRA! */}
+              {isAvailable && (
+                <div className="bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/90 border-2 sm:border-3 border-emerald-400 rounded-3xl p-5 sm:p-6 text-center space-y-3 shadow-2xl shadow-emerald-950">
+                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 mx-auto flex items-center justify-center border border-emerald-500/40 shadow-inner">
+                    <Sparkles className="w-7 h-7" />
+                  </div>
+                  
+                  <div>
+                    <div className="font-mono text-3xl sm:text-4xl font-black text-amber-300 drop-shadow-md">
+                      Milhar {cleanSearch}
+                    </div>
+                    <div className="inline-block mt-1 px-3.5 py-1 rounded-full bg-emerald-500 text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider shadow-md">
+                      ✅ MILHAR DISPONÍVEL!
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-emerald-200 font-semibold">
+                    Valor: apenas <strong className="text-white text-sm">R$ 2,00</strong> no Pix
+                  </p>
+
+                  <button
+                    onClick={() => handleNumberClick(cleanSearch)}
+                    disabled={isCutoff}
+                    className={`w-full py-3.5 sm:py-4 px-6 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2.5 transition-all transform active:scale-95 shadow-xl cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/40 border-2 border-yellow-200'
+                        : 'bg-gradient-to-r from-emerald-400 via-green-500 to-emerald-600 hover:from-emerald-300 hover:to-green-400 text-slate-950 shadow-emerald-500/40 border-2 border-emerald-300'
+                    }`}
+                  >
+                    {isSelected ? (
+                      <>
+                        <Check className="w-5 h-5 stroke-[3]" />
+                        <span>Milhar {cleanSearch} Selecionada! (Toque para Remover)</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShoppingCart className="w-5 h-5" />
+                        <span>Adicionar Milhar {cleanSearch} ao Pedido (R$ 2,00)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-amber-400 border border-amber-300" />
-              <span>Selecionado</span>
+          ) : cleanSearch.length > 0 ? (
+            <div className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2">
+              ⏳ Digite mais {4 - cleanSearch.length} número(s) para verificar a milhar de 4 dígitos.
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-cyan-600 border border-cyan-400" />
-              <span>Meu</span>
+          ) : (
+            <div className="text-[11px] sm:text-xs text-slate-400 bg-slate-950/50 rounded-xl px-4 py-2 border border-slate-800">
+              💡 Dica: Você pode escolher qualquer combinação de 4 números (ex: seu ano de nascimento, final da placa, etc.).
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-amber-950/80 border border-amber-500/70" />
-              <span>Reservado</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-slate-800/80 border border-slate-700" />
-              <span>Vendido</span>
-            </div>
-          </div>
+          )}
 
         </div>
-
-        {/* Grupos de Milhares (0000-0999, etc.) - desativa se estiver buscando */}
-        {!searchTerm && (
-          <div className="mt-3 pt-2.5 sm:mt-4 sm:pt-3 border-t border-slate-800">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-              <span className="text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1 shrink-0">
-                Grupo:
-              </span>
-              {groups.map((grp, idx) => (
-                <button
-                  key={grp.label}
-                  onClick={() => {
-                    setGroupIndex(idx);
-                    setPageIndex(0);
-                  }}
-                  className={`px-2 py-1 rounded-lg font-mono text-[11px] sm:text-xs font-bold transition-colors whitespace-nowrap ${
-                    groupIndex === idx
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'bg-slate-950/80 text-slate-400 hover:text-white hover:bg-slate-800'
-                  }`}
-                >
-                  {grp.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Sub-paginação dentro do grupo (páginas de 100) */}
-            <div className="flex items-center justify-between mt-2.5 text-xs text-slate-400">
-              <button
-                disabled={pageIndex === 0}
-                onClick={() => setPageIndex(p => Math.max(0, p - 1))}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-800 text-slate-300 text-[11px] sm:text-xs"
-              >
-                <ChevronLeft className="w-3 h-3" />
-                <span>Voltar 100</span>
-              </button>
-
-              <span className="font-mono text-emerald-400 font-semibold text-[11px] sm:text-xs">
-                {groupIndex * 1000 + pageIndex * PAGE_SIZE} a {groupIndex * 1000 + (pageIndex + 1) * PAGE_SIZE - 1}
-              </span>
-
-              <button
-                disabled={pageIndex >= 9}
-                onClick={() => setPageIndex(p => Math.min(9, p + 1))}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-800 text-slate-300 text-[11px] sm:text-xs"
-              >
-                <span>Mais 100</span>
-                <ChevronRight className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        )}
-
       </div>
 
-      {/* Grade de Milhares - 4 a 5 colunas em celular, até 10 em desktop */}
-      <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-1.5 sm:gap-2.5">
-        {visibleNumbers.length === 0 ? (
-          <div className="col-span-full py-10 text-center text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800">
-            <p className="text-sm font-semibold">Nenhum bilhete encontrado com esses filtros.</p>
+      {/* GERADOR DE SURPRESINHA (OPÇÃO RÁPIDA) */}
+      <div className="bg-slate-900/80 border border-emerald-900/40 rounded-3xl p-4 sm:p-6 mb-6 backdrop-blur-sm">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+          <div className="flex items-center gap-2.5 text-center sm:text-left">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+              <Dices className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-extrabold text-white">
+                Não tem um número em mente? Gere uma Surpresinha
+              </h3>
+              <p className="text-[11px] sm:text-xs text-slate-400">
+                O sistema sorteia milhares aleatórias que estão 100% disponíveis para compra.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-center">
             <button
-              onClick={() => {
-                setSearchTerm('');
-                setFilterType('all');
-              }}
-              className="mt-3 px-4 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold"
+              onClick={() => handleSurpresinha(1)}
+              className="px-3 py-2 text-xs font-bold rounded-xl bg-slate-800 hover:bg-emerald-800 text-emerald-300 border border-emerald-700/40 transition-colors shadow-sm"
+              title="Escolher 1 milhar aleatória"
             >
-              Limpar Filtros
+              +1 Milhar
+            </button>
+            <button
+              onClick={() => handleSurpresinha(3)}
+              className="px-3 py-2 text-xs font-bold rounded-xl bg-slate-800 hover:bg-emerald-800 text-emerald-300 border border-emerald-700/40 transition-colors shadow-sm"
+              title="Escolher 3 milhares aleatórias"
+            >
+              +3 Milhares
+            </button>
+            <button
+              onClick={() => handleSurpresinha(5)}
+              className="px-3 py-2 text-xs font-bold rounded-xl bg-slate-800 hover:bg-emerald-800 text-emerald-300 border border-emerald-700/40 transition-colors shadow-sm"
+              title="Escolher 5 milhares aleatórias"
+            >
+              +5 Milhares
+            </button>
+            <button
+              onClick={() => handleSurpresinha(10)}
+              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-amber-600 hover:from-emerald-500 hover:to-amber-500 text-white shadow-md transition-all"
+              title="Escolher 10 milhares aleatórias"
+            >
+              +10 Milhares
             </button>
           </div>
-        ) : (
-          visibleNumbers.map((numStr) => {
-            const isSold = soldSet.has(numStr);
-            const isMy = mySet.has(numStr);
-            const isReserved = reservedSet.has(numStr) && !isSold && !isMy;
-            const isSelected = selectedSet.has(numStr);
-
-            let buttonClass = 'bg-slate-950/80 hover:bg-emerald-950/60 border-emerald-900/60 text-emerald-200 hover:border-emerald-500 shadow-sm';
-            
-            if (isSelected) {
-              buttonClass = 'bg-gradient-to-br from-amber-400 to-yellow-500 border-amber-300 text-slate-950 font-black shadow-lg shadow-amber-500/30 scale-105 z-10';
-            } else if (isMy) {
-              buttonClass = 'bg-cyan-950/90 border-cyan-500 text-cyan-300 shadow-sm cursor-default';
-            } else if (isReserved) {
-              buttonClass = 'bg-amber-950/30 border-amber-500/50 text-amber-300/60 cursor-not-allowed';
-            } else if (isSold) {
-              buttonClass = 'bg-slate-900/50 border-slate-800/80 text-slate-600 line-through cursor-not-allowed';
-            }
-
-            return (
-              <button
-                key={numStr}
-                disabled={isSold || isReserved}
-                onClick={() => handleNumberClick(numStr)}
-                className={`relative flex flex-col items-center justify-center py-2 px-1 sm:p-2.5 rounded-xl border text-xs sm:text-base font-mono font-bold transition-all duration-150 transform active:scale-95 min-h-[42px] sm:min-h-[48px] ${buttonClass}`}
-                title={
-                  isSelected
-                    ? `Milhar ${numStr} selecionado para compra`
-                    : isMy
-                    ? `Milhar ${numStr} já comprado por você!`
-                    : isReserved
-                    ? `Milhar ${numStr} reservada (aguardando pagamento Pix)`
-                    : isSold
-                    ? `Milhar ${numStr} já vendido`
-                    : `Comprar milhar ${numStr} por R$ 2,00`
-                }
-              >
-                <span>{numStr}</span>
-
-                {/* Badges de Estado */}
-                {isSelected && (
-                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-slate-950 text-amber-400 rounded-full flex items-center justify-center text-[9px] border border-amber-400">
-                    <Check className="w-2 h-2 stroke-[3]" />
-                  </span>
-                )}
-                {isMy && (
-                  <span className="text-[8px] font-sans font-bold tracking-tight text-cyan-400 uppercase">
-                    Meu
-                  </span>
-                )}
-                {isReserved && (
-                  <span className="absolute -top-1 -right-1 text-amber-400 bg-slate-950 rounded-full p-0.5 border border-amber-500/50" title="Reservado no Pix">
-                    <Clock className="w-2.5 h-2.5 animate-pulse" />
-                  </span>
-                )}
-                {isSold && (
-                  <span className="absolute -top-1 -right-1 text-slate-600">
-                    <Lock className="w-2 h-2" />
-                  </span>
-                )}
-              </button>
-            );
-          })
-        )}
+        </div>
       </div>
 
-      {/* Barra Flutuante de Carrinho / Checkout Pix (Acima da BottomNav no celular) */}
+      {/* SEÇÃO: SEUS BILHETES ESCOLHIDOS (CARRINHO) */}
+      {selectedNumbers.length > 0 && (
+        <div className="bg-slate-900 border-2 border-emerald-500 rounded-3xl p-4 sm:p-6 mb-6 shadow-2xl shadow-emerald-950 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-sm sm:text-base font-black text-white">
+                  Seus Bilhetes Escolhidos ({selectedNumbers.length})
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  R$ 2,00 por milhar • Concorrendo a R$ 500,00 às 19:00h
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 justify-between sm:justify-end">
+              <div className="text-right">
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Total:</span>
+                <span className="text-xl sm:text-2xl font-black text-amber-400">
+                  {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </span>
+              </div>
+              <button
+                onClick={onClearSelection}
+                className="p-2 text-xs text-slate-400 hover:text-red-400 transition-colors"
+                title="Limpar todos os bilhetes selecionados"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Chips dos números selecionados */}
+          <div className="flex flex-wrap gap-2 pt-3.5 mb-4">
+            {selectedNumbers.map((num) => (
+              <span
+                key={num}
+                onClick={() => handleNumberClick(num)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400/20 text-amber-300 border border-amber-400/50 font-mono font-bold text-sm sm:text-base cursor-pointer hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/40 transition-colors shadow-sm group"
+                title={`Clique para remover a milhar ${num}`}
+              >
+                <span>{num}</span>
+                <X className="w-3.5 h-3.5 group-hover:scale-125 transition-transform" />
+              </span>
+            ))}
+          </div>
+
+          {/* Botão de Finalização da Compra */}
+          <button
+            onClick={onCheckout}
+            disabled={isCutoff}
+            className={`w-full py-4 px-6 rounded-2xl font-black text-sm sm:text-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 shadow-xl cursor-pointer ${
+              isCutoff
+                ? 'bg-amber-600/70 text-amber-100 cursor-not-allowed opacity-90'
+                : 'bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-emerald-500/40 border-2 border-emerald-300'
+            }`}
+          >
+            {isCutoff ? (
+              <span>Vendas Encerradas às 18:55 (Sorteio 19h)</span>
+            ) : (
+              <>
+                <span>Pagar Pix:</span>
+                <span className="font-black">
+                  {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </span>
+                <ArrowRight className="w-5 h-5 ml-1" />
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* SEÇÃO: MEUS BILHETES COMPRADOS NA RODADA ATIVA */}
+      {myTickets.length > 0 && (
+        <div className="bg-slate-900/60 border border-cyan-500/40 rounded-3xl p-4 sm:p-5 text-center sm:text-left mb-6">
+          <div className="flex items-center gap-2 mb-2 text-cyan-300 font-bold text-xs sm:text-sm">
+            <Ticket className="w-4 h-4" />
+            <span>Seus bilhetes comprados para hoje ({myTickets.length}):</span>
+          </div>
+          <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+            {myTickets.map((t) => (
+              <span
+                key={t.id || t.numero_milhar}
+                className="px-2.5 py-1 rounded-lg bg-cyan-950/80 text-cyan-300 border border-cyan-500/50 font-mono font-bold text-xs"
+              >
+                {t.numero_milhar}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* BARRA FLUTUANTE DE CHECKOUT NO CELULAR (QUANDO HOUVER NÚMEROS SELECIONADOS) */}
       {selectedNumbers.length > 0 && (
         <div className="fixed bottom-16 sm:bottom-4 left-3 right-3 sm:left-4 sm:right-4 max-w-3xl mx-auto z-40 animate-in fade-in slide-in-from-bottom duration-200">
-          <div className="bg-slate-950/95 backdrop-blur-md border-2 border-emerald-500 rounded-2xl p-3 sm:p-4 shadow-2xl shadow-black flex items-center justify-between gap-2 sm:gap-4">
+          <div className="bg-slate-950/95 backdrop-blur-md border-2 border-emerald-400 rounded-2xl p-3 sm:p-4 shadow-2xl shadow-black flex items-center justify-between gap-2 sm:gap-4">
             
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="flex items-center justify-center w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">

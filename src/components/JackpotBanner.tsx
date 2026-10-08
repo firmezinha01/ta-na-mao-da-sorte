@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Trophy, Clock, Flame, Calendar, Sparkles, ChevronDown } from 'lucide-react';
+import { Trophy, Clock, Flame, Calendar, Sparkles, ChevronDown, Ticket, MousePointerClick } from 'lucide-react';
 import { Sorteio } from '@/types';
 import { sounds } from '@/lib/sound';
 import { getNextDrawTargetDate } from '@/lib/drawTime';
@@ -203,14 +203,26 @@ export const JackpotBanner: React.FC<JackpotBannerProps> = ({
           </div>
         </div>
 
-        {/* Botão de Ação Principal */}
-        <div className="flex items-center justify-center w-full max-w-sm">
+        {/* Botão de Ação Principal - SUPER DESTACADO */}
+        <div className="flex flex-col items-center justify-center w-full max-w-md my-2.5 sm:my-3">
+          {/* Tag de chamada animada */}
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 text-[11px] sm:text-xs font-black uppercase tracking-wider mb-2 shadow-lg shadow-amber-500/30 animate-bounce">
+            <MousePointerClick className="w-4 h-4 animate-pulse text-slate-950" />
+            <span>👉 CLIQUE AQUI PARA FAZER SUA COMPRA 👈</span>
+          </div>
+
           <button
             onClick={onScrollToGrid}
-            className="w-full flex items-center justify-center gap-2 px-6 py-2.5 sm:py-3 rounded-xl font-black text-xs sm:text-sm bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-lg shadow-emerald-500/30 transition-all transform active:scale-95"
+            className="group relative w-full flex flex-col items-center justify-center py-4 sm:py-5 px-6 sm:px-8 rounded-2xl font-black bg-gradient-to-r from-amber-400 via-emerald-400 to-green-400 hover:from-amber-300 hover:via-emerald-300 hover:to-green-300 text-slate-950 shadow-[0_0_35px_rgba(16,185,129,0.55)] hover:shadow-[0_0_55px_rgba(245,158,11,0.8)] border-2 sm:border-3 border-yellow-200 transition-all transform hover:scale-[1.02] active:scale-95 ring-4 ring-emerald-500/40 cursor-pointer"
           >
-            <span>Escolher Milhares (R$ 2 cada)</span>
-            <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-bounce" />
+            <div className="flex items-center justify-center gap-2 sm:gap-3 text-base sm:text-xl font-black tracking-wide text-slate-950">
+              <Ticket className="w-5 h-5 sm:w-6 sm:h-6 text-slate-950 animate-pulse shrink-0" />
+              <span>Escolher Milhares (R$ 2 cada)</span>
+              <ChevronDown className="w-5 h-5 sm:w-6 sm:h-6 text-slate-950 animate-bounce shrink-0" />
+            </div>
+            <span className="text-[11px] sm:text-xs font-extrabold text-slate-900/90 mt-0.5 tracking-tight">
+              Toque aqui para digitar seu número da sorte no Pix
+            </span>
           </button>
         </div>
 

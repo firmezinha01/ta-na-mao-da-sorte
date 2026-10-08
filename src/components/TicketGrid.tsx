@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { 
   Search, 
   Sparkles, 
@@ -15,7 +15,9 @@ import {
   AlertCircle,
   ArrowRight,
   Trash2,
-  Ticket
+  Ticket,
+  Plus,
+  RefreshCw
 } from 'lucide-react';
 import { Bilhete, Usuario } from '@/types';
 import { sounds } from '@/lib/sound';
@@ -58,6 +60,8 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
 
   // Campo de busca da milhar desejada (ex: 1234)
   const [searchTerm, setSearchTerm] = useState('');
+  const [lastAddedNumber, setLastAddedNumber] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Mapeamentos em Map / Set para consulta O(1) instantânea
   const soldSet = useMemo(() => {
@@ -75,6 +79,37 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
   const selectedSet = useMemo(() => {
     return new Set(selectedNumbers);
   }, [selectedNumbers]);
+
+  // Gerador de sugestões de milhares disponíveis
+  const generateSuggestions = useCallback(() => {
+    const pool: string[] = [];
+    for (let i = 0; i < 10000; i++) {
+      const numStr = i.toString().padStart(4, '0');
+      if (!soldSet.has(numStr) && !reservedSet.has(numStr)) {
+        pool.push(numStr);
+      }
+    }
+    const picked: string[] = [];
+    for (let i = 0; i < 16 && pool.length > 0; i++) {
+      const idx = Math.floor(Math.random() * pool.length);
+      picked.push(pool[idx]);
+      pool.splice(idx, 1);
+    }
+    return picked;
+  }, [soldSet, reservedSet]);
+
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (suggestions.length === 0) {
+      setSuggestions(generateSuggestions());
+    }
+  }, [generateSuggestions, suggestions.length]);
+
+  const handleRefreshSuggestions = () => {
+    sounds.playClick();
+    setSuggestions(generateSuggestions());
+  };
 
   // Função Surpresinha (Gerador da Sorte de milhares aleatórios não vendidos e não reservados)
   const handleSurpresinha = (quantity: number) => {
@@ -115,6 +150,28 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
     }
     sounds.playClick();
     onToggleNumber(numStr);
+  };
+
+  // Adiciona a milhar digitada e limpa o campo para poder digitar a próxima livremente
+  const handleAddSearchedMilhar = (numStr: string) => {
+    if (soldSet.has(numStr) || reservedSet.has(numStr)) return;
+    if (!currentUser) {
+      onRequireLogin(`Para escolher a milhar ${numStr}, preencha seu Nome, CPF e WhatsApp antes.`);
+      return;
+    }
+    sounds.playClick();
+    if (!selectedNumbers.includes(numStr)) {
+      onToggleNumber(numStr);
+    }
+    setLastAddedNumber(numStr);
+    setSearchTerm('');
+  };
+
+  const handleFocusInput = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   };
 
   const totalAmount = selectedNumbers.length * 2.00;
@@ -188,17 +245,19 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
           </h2>
 
           <p className="text-xs sm:text-sm text-slate-300 max-w-xl mb-5 sm:mb-6">
-            Digite abaixo os <strong>4 dígitos da milhar</strong> que você quer concorrer (ex: <strong>1234</strong>, <strong>0582</strong>, <strong>7777</strong>). O sistema informa instantaneamente se ela está <strong>disponível</strong> ou <strong>indisponível</strong>.
+            Digite abaixo os <strong>4 dígitos da milhar</strong> que você quer concorrer (ex: <strong>1234</strong>, <strong>0582</strong>, <strong>7777</strong>). Você pode adicionar quantas milhares quiser ao seu pedido antes de pagar!
           </p>
 
           {/* CAMPO DE DIGITAÇÃO SUPER DESTACADO */}
-          <div className="w-full max-w-md bg-slate-950/90 rounded-3xl p-4 sm:p-6 border-2 border-emerald-500/70 shadow-2xl shadow-emerald-950/80 mb-5">
+          <div className="w-full max-w-md bg-slate-950/90 rounded-3xl p-4 sm:p-6 border-2 border-emerald-500/70 shadow-2xl shadow-emerald-950/80 mb-4">
             <label className="block text-xs sm:text-sm font-black text-amber-300 uppercase tracking-wider mb-2.5">
               👇 DIGITE SUA MILHAR AQUI (4 DÍGITOS):
             </label>
 
             <div className="relative">
               <input
+                ref={inputRef}
+                id="search-milhar-input"
                 type="text"
                 inputMode="numeric"
                 maxLength={4}
@@ -241,6 +300,19 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
 
           </div>
 
+          {/* Feedback de Última Milhar Adicionada */}
+          {lastAddedNumber && !isCompleteMilhar && (
+            <div className="w-full max-w-md bg-emerald-500/15 border-2 border-emerald-400/60 rounded-2xl p-3 sm:p-3.5 text-center mb-3 animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center justify-center gap-2 text-emerald-300 font-black text-xs sm:text-sm">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Milhar {lastAddedNumber} adicionada ao seu pedido!</span>
+              </div>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                Digite outra milhar acima ou clique nas sugestões abaixo para adicionar mais bilhetes.
+              </p>
+            </div>
+          )}
+
           {/* PAINEL DE STATUS DA MILHAR DIGITADA */}
           {isCompleteMilhar ? (
             <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
@@ -261,7 +333,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
                     Esta milhar já foi comprada por outro participante para o sorteio de hoje às 19:00h.
                   </p>
                   <p className="text-[11px] text-red-300 font-semibold pt-1">
-                    💡 Digite outro número da sua sorte acima ou use a Surpresinha abaixo!
+                    💡 Digite outro número da sua sorte acima ou use as sugestões abaixo!
                   </p>
                 </div>
               )}
@@ -326,7 +398,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
                   </p>
 
                   <button
-                    onClick={() => handleNumberClick(cleanSearch)}
+                    onClick={() => handleAddSearchedMilhar(cleanSearch)}
                     disabled={isCutoff}
                     className={`w-full py-3.5 sm:py-4 px-6 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2.5 transition-all transform active:scale-95 shadow-xl cursor-pointer ${
                       isSelected
@@ -337,12 +409,12 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
                     {isSelected ? (
                       <>
                         <Check className="w-5 h-5 stroke-[3]" />
-                        <span>Milhar {cleanSearch} Selecionada! (Toque para Remover)</span>
+                        <span>Milhar {cleanSearch} já adicionada! (Toque para Remover)</span>
                       </>
                     ) : (
                       <>
-                        <ShoppingCart className="w-5 h-5" />
-                        <span>Adicionar Milhar {cleanSearch} ao Pedido (R$ 2,00)</span>
+                        <Plus className="w-5 h-5 stroke-[3]" />
+                        <span>Adicionar Milhar {cleanSearch} ao Pedido (+R$ 2,00)</span>
                       </>
                     )}
                   </button>
@@ -356,10 +428,68 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
             </div>
           ) : (
             <div className="text-[11px] sm:text-xs text-slate-400 bg-slate-950/50 rounded-xl px-4 py-2 border border-slate-800">
-              💡 Dica: Você pode escolher qualquer combinação de 4 números (ex: seu ano de nascimento, final da placa, etc.).
+              💡 Dica: Você pode digitar qualquer combinação de 4 números ou tocar nas sugestões abaixo para adicionar múltiplos bilhetes.
             </div>
           )}
 
+        </div>
+      </div>
+
+      {/* SUGESTÕES DE MILHARES DISPONÍVEIS (CLIQUE PARA ADICIONAR) */}
+      <div className="bg-slate-900/90 border-2 border-emerald-500/50 rounded-3xl p-4 sm:p-6 mb-6 shadow-xl backdrop-blur-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-1.5">
+                <span>Sugestões de Milhares Disponíveis</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+                  Toque para Adicionar
+                </span>
+              </h3>
+              <p className="text-[11px] sm:text-xs text-slate-300">
+                Gostou de algum número? Basta tocar para incluir no seu pedido (R$ 2,00 cada).
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleRefreshSuggestions}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 text-xs font-bold border border-emerald-500/30 transition-colors shrink-0 cursor-pointer"
+            title="Gerar novas sugestões de milhares"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Ver Outras Sugestões</span>
+          </button>
+        </div>
+
+        {/* Grade de Botões das Sugestões */}
+        <div className="grid grid-cols-2 xs:grid-cols-4 sm:grid-cols-4 md:grid-cols-8 gap-2 sm:gap-2.5">
+          {suggestions.map((numStr) => {
+            const isSel = selectedSet.has(numStr);
+            return (
+              <button
+                key={numStr}
+                onClick={() => handleNumberClick(numStr)}
+                disabled={isCutoff}
+                className={`relative py-3 px-2 rounded-2xl font-mono text-sm sm:text-base font-black transition-all transform active:scale-95 flex items-center justify-center gap-1.5 shadow-sm cursor-pointer ${
+                  isSel
+                    ? 'bg-amber-400 text-slate-950 border-2 border-yellow-200 shadow-amber-500/30 scale-105 z-10'
+                    : 'bg-slate-950/80 hover:bg-emerald-950/60 text-emerald-200 border border-emerald-500/40 hover:border-emerald-400'
+                }`}
+                title={isSel ? `Milhar ${numStr} selecionada! Clique para remover` : `Clique para adicionar a milhar ${numStr} (R$ 2,00)`}
+              >
+                <span>{numStr}</span>
+                {isSel ? (
+                  <Check className="w-3.5 h-3.5 stroke-[3] text-slate-950" />
+                ) : (
+                  <Plus className="w-3.5 h-3.5 text-emerald-400/80" />
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -372,7 +502,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-extrabold text-white">
-                Não tem um número em mente? Gere uma Surpresinha
+                Ou gere uma Surpresinha com números aleatórios
               </h3>
               <p className="text-[11px] sm:text-xs text-slate-400">
                 O sistema sorteia milhares aleatórias que estão 100% disponíveis para compra.
@@ -413,27 +543,27 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
         </div>
       </div>
 
-      {/* SEÇÃO: SEUS BILHETES ESCOLHIDOS (CARRINHO) */}
+      {/* SEÇÃO: SEUS BILHETES ESCOLHIDOS (CARRINHO COM MÚLTIPLOS BILHETES) */}
       {selectedNumbers.length > 0 && (
         <div className="bg-slate-900 border-2 border-emerald-500 rounded-3xl p-4 sm:p-6 mb-6 shadow-2xl shadow-emerald-950 animate-in fade-in slide-in-from-bottom-2 duration-200">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                <ShoppingCart className="w-4 h-4" />
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                <ShoppingCart className="w-5 h-5" />
               </div>
               <div>
                 <h4 className="text-sm sm:text-base font-black text-white">
                   Seus Bilhetes Escolhidos ({selectedNumbers.length})
                 </h4>
-                <p className="text-[11px] text-slate-400">
-                  R$ 2,00 por milhar • Concorrendo a R$ 500,00 às 19:00h
+                <p className="text-[11px] text-slate-300">
+                  Compre quantas milhares quiser • R$ 2,00 por milhar • Concorrendo a R$ 500,00 às 19:00h
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3 justify-between sm:justify-end">
               <div className="text-right">
-                <span className="text-[10px] text-slate-400 block uppercase font-bold">Total:</span>
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Total a Pagar:</span>
                 <span className="text-xl sm:text-2xl font-black text-amber-400">
                   {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </span>
@@ -463,28 +593,37 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
             ))}
           </div>
 
-          {/* Botão de Finalização da Compra */}
-          <button
-            onClick={onCheckout}
-            disabled={isCutoff}
-            className={`w-full py-4 px-6 rounded-2xl font-black text-sm sm:text-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 shadow-xl cursor-pointer ${
-              isCutoff
-                ? 'bg-amber-600/70 text-amber-100 cursor-not-allowed opacity-90'
-                : 'bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-emerald-500/40 border-2 border-emerald-300'
-            }`}
-          >
-            {isCutoff ? (
-              <span>Vendas Encerradas às 18:55 (Sorteio 19h)</span>
-            ) : (
-              <>
-                <span>Pagar Pix:</span>
-                <span className="font-black">
-                  {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                </span>
-                <ArrowRight className="w-5 h-5 ml-1" />
-              </>
-            )}
-          </button>
+          {/* Botões de Ação: Continuar Adicionando OU Finalizar Pagamento */}
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <button
+              onClick={handleFocusInput}
+              className="w-full sm:w-auto px-5 py-3.5 rounded-2xl font-black text-xs sm:text-sm bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 transition-colors cursor-pointer text-center"
+            >
+              + Digitar Outra Milhar
+            </button>
+
+            <button
+              onClick={onCheckout}
+              disabled={isCutoff}
+              className={`w-full flex-1 py-4 px-6 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2 transition-all transform active:scale-95 shadow-xl cursor-pointer ${
+                isCutoff
+                  ? 'bg-amber-600/70 text-amber-100 cursor-not-allowed opacity-90'
+                  : 'bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-emerald-500/40 border-2 border-emerald-300'
+              }`}
+            >
+              {isCutoff ? (
+                <span>Vendas Encerradas às 18:55 (Sorteio 19h)</span>
+              ) : (
+                <>
+                  <span>Finalizar Compra ({selectedNumbers.length} {selectedNumbers.length === 1 ? 'bilhete' : 'bilhetes'}) - Pagar Pix:</span>
+                  <span className="font-black text-base sm:text-lg">
+                    {totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  <ArrowRight className="w-5 h-5 ml-1" />
+                </>
+              )}
+            </button>
+          </div>
         </div>
       )}
 

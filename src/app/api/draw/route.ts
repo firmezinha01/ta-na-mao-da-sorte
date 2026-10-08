@@ -1,20 +1,28 @@
 import { NextResponse } from 'next/server';
 import { ServerDrawService } from '@/lib/serverDraw';
 import { getNextDrawSchedule, isSalesCutoffActive } from '@/lib/drawTime';
+import { DatabaseService } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/draw
- * Retorna o estado oficial centralizado do sorteio, sincronização de tempo do servidor e bilhetes vendidos.
+ * Retorna o estado oficial centralizado do sorteio, sincronização de tempo do servidor, bilhetes vendidos e bilhetes reservados.
  */
 export async function GET() {
   try {
     const serverTime = Date.now();
     let schedule = getNextDrawSchedule();
-    const [draw, lastFinishedDraw] = await Promise.all([
+
+    // Auto-verifica reservas pendentes com o Mercado Pago (com throttle de 8s)
+    await DatabaseService.checkAndAutoConfirmPendingReservations().catch(err => {
+      console.warn('Erro ao auto-verificar reservas:', err);
+    });
+
+    const [draw, lastFinishedDraw, reservedData] = await Promise.all([
       ServerDrawService.getCurrentOrScheduledDraw(),
-      ServerDrawService.getLastFinishedDraw()
+      ServerDrawService.getLastFinishedDraw(),
+      DatabaseService.getReservedTickets()
     ]);
     const tickets = await ServerDrawService.getConfirmedTickets(draw.id);
     const isCutoff = isSalesCutoffActive();
@@ -50,6 +58,7 @@ export async function GET() {
       serverTime,
       draw,
       tickets,
+      reservedTickets: reservedData.tickets,
       schedule,
       isCutoff,
       lastFinishedDraw

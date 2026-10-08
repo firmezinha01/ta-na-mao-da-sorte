@@ -2,8 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus, Commission } from '@/types';
+import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus, Commission, TicketReservation } from '@/types';
 import { WhatsAppTemplates, sendWhatsAppMessage } from './whatsapp';
+import { checkPaymentStatus } from './mercadopago';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'database.json');
@@ -16,6 +17,7 @@ interface DatabaseSchema {
   afiliados: Affiliate[];
   afiliados_links: AffiliateLink[];
   comissoes: Commission[];
+  reservas: TicketReservation[];
 }
 
 const DEFAULT_DB: DatabaseSchema = {
@@ -58,7 +60,8 @@ const DEFAULT_DB: DatabaseSchema = {
   mensagens: [],
   afiliados: [],
   afiliados_links: [],
-  comissoes: []
+  comissoes: [],
+  reservas: []
 };
 
 /**
@@ -75,9 +78,14 @@ function readLocalDb(): DatabaseSchema {
     }
     const content = fs.readFileSync(DB_FILE, 'utf-8');
     const parsed = JSON.parse(content);
+    if (!parsed.usuarios) parsed.usuarios = [];
+    if (!parsed.bilhetes) parsed.bilhetes = [];
+    if (!parsed.sorteios) parsed.sorteios = [];
+    if (!parsed.mensagens) parsed.mensagens = [];
     if (!parsed.afiliados) parsed.afiliados = [];
     if (!parsed.afiliados_links) parsed.afiliados_links = [];
     if (!parsed.comissoes) parsed.comissoes = [];
+    if (!parsed.reservas) parsed.reservas = [];
     return parsed;
   } catch (err) {
     console.error('Erro ao ler DB local:', err);
@@ -1122,5 +1130,290 @@ export class DatabaseService {
       (c.affiliateId && c.affiliateId.toUpperCase() === clean) ||
       (c.affiliateCode && c.affiliateCode.toUpperCase() === clean)
     );
+  }
+
+  /**
+   * Cria uma reserva temporária de bilhetes vinculada a uma cobrança Pix (válida por 15 min)
+   * Garante que os números não sejam comprados ou reservados por outros participantes.
+   */
+  static async createTicketReservation(params: {
+    paymentId: string;
+    tickets: string[];
+    amount: number;
+    userName: string;
+    userCpf: string;
+    userWhatsapp: string;
+    userEmail?: string;
+    affiliateCode?: string;
+    campaign?: string;
+    expiresMinutes?: number;
+  }): Promise<{ success: boolean; reservation?: TicketReservation; error?: string; conflictTickets?: string[] }> {
+    const cleanCpf = (params.userCpf || '').replace(/\D/g, '');
+    const cleanPhone = (params.userWhatsapp || '').replace(/\D/g, '');
+    const cleanName = (params.userName || '').trim();
+    const requestedTickets = [...new Set(params.tickets)];
+
+    const localDb = readLocalDb();
+    if (!localDb.reservas) localDb.reservas = [];
+
+    const nowIso = new Date().toISOString();
+
+    // 1. Limpa ou marca como expiradas as reservas que já venceram
+    for (const r of localDb.reservas) {
+      if (r.status === 'pending' && r.expiresAt <= nowIso) {
+        r.status = 'expired';
+      }
+    }
+
+    // 2. Verifica se algum bilhete já foi comprado no sorteio ativo
+    const confirmedTickets = await this.getTickets();
+    const soldSet = new Set(confirmedTickets.map(b => b.numero_milhar));
+    const soldConflicts = requestedTickets.filter(n => soldSet.has(n));
+    if (soldConflicts.length > 0) {
+      return {
+        success: false,
+        error: `O(s) bilhete(s) ${soldConflicts.join(', ')} já foi(ram) adquirido(s). Por favor, escolha outros números.`,
+        conflictTickets: soldConflicts
+      };
+    }
+
+    // 3. Verifica se algum bilhete está em reserva pendente ativa por outro pagamento
+    const activeReservations = localDb.reservas.filter(
+      r => r.status === 'pending' && r.expiresAt > nowIso && r.paymentId !== params.paymentId
+    );
+    const reservedSet = new Set(activeReservations.flatMap(r => r.tickets));
+    const reservedConflicts = requestedTickets.filter(n => reservedSet.has(n));
+    if (reservedConflicts.length > 0) {
+      return {
+        success: false,
+        error: `O(s) bilhete(s) ${reservedConflicts.join(', ')} já está(ão) reservado(s) aguardando pagamento Pix de outro participante.`,
+        conflictTickets: reservedConflicts
+      };
+    }
+
+    // 4. Cria ou atualiza a reserva
+    const expiresAt = new Date(Date.now() + (params.expiresMinutes || 15) * 60 * 1000).toISOString();
+    const newReservation: TicketReservation = {
+      id: params.paymentId,
+      paymentId: params.paymentId,
+      tickets: requestedTickets,
+      amount: params.amount,
+      userName: cleanName || 'Participante da Sorte',
+      userCpf: cleanCpf,
+      userWhatsapp: cleanPhone,
+      userEmail: params.userEmail,
+      affiliateCode: params.affiliateCode,
+      campaign: params.campaign,
+      status: 'pending',
+      createdAt: nowIso,
+      expiresAt
+    };
+
+    // Remove reserva anterior com o mesmo paymentId se houver
+    localDb.reservas = localDb.reservas.filter(r => r.paymentId !== params.paymentId && r.id !== params.paymentId);
+    localDb.reservas.push(newReservation);
+    writeLocalDb(localDb);
+
+    // Opcional: tenta registrar no Supabase se houver tabela 'reservas' (sem quebrar se não houver)
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('reservas').upsert({
+          id: newReservation.id,
+          payment_id: newReservation.paymentId,
+          tickets: newReservation.tickets,
+          amount: newReservation.amount,
+          user_name: newReservation.userName,
+          user_cpf: newReservation.userCpf,
+          user_whatsapp: newReservation.userWhatsapp,
+          affiliate_code: newReservation.affiliateCode,
+          campaign: newReservation.campaign,
+          status: newReservation.status,
+          created_at: newReservation.createdAt,
+          expires_at: newReservation.expiresAt
+        });
+      } catch {
+        // Ignora caso a tabela 'reservas' não exista no schema do Supabase
+      }
+    }
+
+    return { success: true, reservation: newReservation };
+  }
+
+  /**
+   * Retorna os números das milhares atualmente em reserva ativa pendente (não expiradas)
+   */
+  static async getReservedTickets(): Promise<{ tickets: string[]; reservations: TicketReservation[] }> {
+    const localDb = readLocalDb();
+    if (!localDb.reservas) localDb.reservas = [];
+
+    const nowIso = new Date().toISOString();
+    let updated = false;
+
+    // Atualiza status de expirados
+    for (const r of localDb.reservas) {
+      if (r.status === 'pending' && r.expiresAt <= nowIso) {
+        r.status = 'expired';
+        updated = true;
+      }
+    }
+
+    if (updated) {
+      writeLocalDb(localDb);
+    }
+
+    const activeReservations = localDb.reservas.filter(r => r.status === 'pending' && r.expiresAt > nowIso);
+    const tickets = Array.from(new Set(activeReservations.flatMap(r => r.tickets)));
+
+    return { tickets, reservations: activeReservations };
+  }
+
+  /**
+   * Confirma e valida a reserva após o pagamento do Pix aprovado pelo Mercado Pago.
+   * Cadastra os bilhetes oficialmente no nome do pagador e registra a comissão de afiliado.
+   */
+  static async confirmReservationByPaymentId(
+    paymentId: string,
+    mpPaymentData?: any
+  ): Promise<{ success: boolean; tickets: Bilhete[]; user?: Usuario; alreadyConfirmed?: boolean; error?: string }> {
+    const localDb = readLocalDb();
+    if (!localDb.reservas) localDb.reservas = [];
+
+    let reservation = localDb.reservas.find(r => r.paymentId === paymentId || r.id === paymentId);
+
+    // Se já foi aprovada anteriormente, não duplica
+    if (reservation && reservation.status === 'approved') {
+      const { user, tickets } = await this.getTicketsByCpf(reservation.userCpf);
+      return { success: true, alreadyConfirmed: true, user: user || undefined, tickets };
+    }
+
+    // Se não encontrou no banco local, tenta reconstruir a partir dos metadados do Mercado Pago
+    if (!reservation && mpPaymentData) {
+      const meta = mpPaymentData.metadata || {};
+      const payerObj = mpPaymentData.payer || {};
+      const metaTickets: string[] = Array.isArray(meta.tickets)
+        ? meta.tickets
+        : typeof meta.tickets === 'string'
+          ? meta.tickets.split(',').map((s: string) => s.trim())
+          : [];
+
+      const payerName = meta.payer_name || `${payerObj.first_name || ''} ${payerObj.last_name || ''}`.trim() || 'Participante Pix';
+      const payerCpf = (meta.payer_cpf || payerObj.identification?.number || '').replace(/\D/g, '');
+      const payerPhone = (meta.payer_whatsapp || payerObj.phone?.number || '').replace(/\D/g, '');
+
+      if (metaTickets.length > 0) {
+        reservation = {
+          id: paymentId,
+          paymentId: paymentId,
+          tickets: metaTickets,
+          amount: Number(mpPaymentData.transaction_amount) || metaTickets.length * 2.00,
+          userName: payerName,
+          userCpf: payerCpf,
+          userWhatsapp: payerPhone,
+          affiliateCode: meta.affiliate_code,
+          campaign: meta.campaign,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+        };
+        localDb.reservas.push(reservation);
+      }
+    }
+
+    if (!reservation) {
+      return {
+        success: false,
+        tickets: [],
+        error: `Nenhuma reserva ou metadados encontrados para o pagamento ${paymentId}`
+      };
+    }
+
+    // Registra participante e seus bilhetes de forma definitiva (Supabase e local)
+    const { user, newTickets } = await this.saveParticipant({
+      nome_completo: reservation.userName,
+      cpf: reservation.userCpf,
+      whatsapp: reservation.userWhatsapp,
+      tickets: reservation.tickets,
+      paymentId: reservation.paymentId,
+      affiliateCode: reservation.affiliateCode,
+      campaign: reservation.campaign
+    });
+
+    // Atualiza status da reserva para aprovado
+    reservation.status = 'approved';
+    writeLocalDb(localDb);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase
+          .from('reservas')
+          .update({ status: 'approved' })
+          .eq('payment_id', paymentId);
+      } catch {
+        // Ignora erro se tabela não existir
+      }
+    }
+
+    console.log(`[PixConfirm] Pagamento ${paymentId} validado com sucesso! Usuário: ${user.nome_completo} (${user.cpf}), Bilhetes: ${reservation.tickets.join(', ')}`);
+
+    return {
+      success: true,
+      tickets: newTickets,
+      user
+    };
+  }
+
+  private static lastAutoCheckTime = 0;
+
+  /**
+   * Varre reservas pendentes e auto-confirma com o Mercado Pago aquelas que foram pagas,
+   * garantindo que nenhuma compra seja perdida mesmo se o usuário fechar o navegador.
+   */
+  static async checkAndAutoConfirmPendingReservations(): Promise<number> {
+    const now = Date.now();
+    // Throttle de 8 segundos para evitar sobrecarga de requisições externas ao Mercado Pago
+    if (now - this.lastAutoCheckTime < 8000) {
+      return 0;
+    }
+    this.lastAutoCheckTime = now;
+
+    const localDb = readLocalDb();
+    if (!localDb.reservas) localDb.reservas = [];
+
+    const nowIso = new Date().toISOString();
+    const pendings = localDb.reservas.filter(r => r.status === 'pending');
+    if (pendings.length === 0) return 0;
+
+    let confirmedCount = 0;
+
+    for (const res of pendings) {
+      try {
+        // Se já venceu há mais de 10 minutos após o prazo de 15min, marca expirado
+        if (new Date(res.expiresAt).getTime() < now - 10 * 60 * 1000) {
+          res.status = 'expired';
+          continue;
+        }
+
+        // Não consulta transações com menos de 3 segundos de criação
+        if (now - new Date(res.createdAt).getTime() < 3000) {
+          continue;
+        }
+
+        const mpStatus = await checkPaymentStatus(res.paymentId);
+        if (mpStatus.status === 'approved') {
+          await this.confirmReservationByPaymentId(res.paymentId, mpStatus.paymentData);
+          confirmedCount++;
+        } else if (res.expiresAt <= nowIso && mpStatus.status !== 'pending') {
+          res.status = 'expired';
+        }
+      } catch (err) {
+        console.warn(`[AutoConfirm] Erro ao verificar reserva ${res.paymentId}:`, err);
+      }
+    }
+
+    if (confirmedCount > 0) {
+      writeLocalDb(localDb);
+    }
+
+    return confirmedCount;
   }
 }

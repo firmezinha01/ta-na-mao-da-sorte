@@ -13,6 +13,7 @@ import { LastDrawResultCard, LastDrawInfo } from '@/components/LastDrawResultCar
 import { UserIdentificationModal } from '@/components/UserIdentificationModal';
 import { AppStore } from '@/lib/storage';
 import { Bilhete, Sorteio, Usuario } from '@/types';
+import { sounds } from '@/lib/sound';
 import { 
   ShieldCheck, 
   Trophy, 
@@ -24,6 +25,7 @@ export default function Home() {
   // Estados da aplicação sincronizados com o Servidor / Supabase
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [bilhetes, setBilhetes] = useState<Bilhete[]>([]);
+  const [reservedTickets, setReservedTickets] = useState<string[]>([]);
   const [sorteio, setSorteio] = useState<Sorteio | null>(null);
   const [lastFinishedDraw, setLastFinishedDraw] = useState<LastDrawInfo | null>(null);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -69,6 +71,9 @@ export default function Home() {
         }
         if (data.tickets) {
           setBilhetes(data.tickets);
+        }
+        if (data.reservedTickets) {
+          setReservedTickets(data.reservedTickets);
         }
         if (data.schedule) {
           setTargetTimestamp(data.schedule.targetTimestamp);
@@ -180,14 +185,90 @@ export default function Home() {
     }
   };
 
-  // Montagem e polling leve a cada 4 segundos para manter todos os dispositivos 100% sincronizados
+  // Verificação ao retornar do banco (quando o usuário minimiza/fecha para pagar o Pix)
+  const checkPendingPixOnReturn = useCallback(async () => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('tns_pending_pix');
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      if (!pending?.paymentId) return;
+
+      // Se passou de 30 minutos, descarta
+      if (Date.now() - (pending.createdAt || 0) > 30 * 60 * 1000) {
+        localStorage.removeItem('tns_pending_pix');
+        return;
+      }
+
+      const res = await fetch(`/api/pix/status?paymentId=${pending.paymentId}`);
+      if (res.ok) {
+        const result = await res.json();
+        if (result.status === 'approved') {
+          localStorage.removeItem('tns_pending_pix');
+          sounds.playWinFanfare();
+          try {
+            const confetti = (await import('canvas-confetti')).default;
+            confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+          } catch {}
+
+          if (pending.user || pending.userName) {
+            const uData = pending.user || {
+              nome_completo: pending.userName,
+              cpf: pending.userCpf,
+              whatsapp: pending.userWhatsapp
+            };
+            AppStore.purchaseTickets(pending.tickets || [], uData);
+            if (!currentUser && uData.cpf) {
+              const u: Usuario = {
+                id: `usr_${Date.now()}`,
+                nome_completo: uData.nome_completo,
+                cpf: uData.cpf,
+                whatsapp: uData.whatsapp,
+                data_cadastro: new Date().toISOString()
+              };
+              AppStore.setCurrentUser(u);
+              setCurrentUser(u);
+            }
+          }
+          setSelectedNumbers([]);
+          setIsCheckoutOpen(false);
+          await loadData();
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao verificar Pix pendente ao retornar:', e);
+    }
+  }, [currentUser, loadData]);
+
+  // Montagem, polling leve a cada 4 segundos e verificação instantânea ao retornar de outro app
   useEffect(() => {
     loadData();
+    checkPendingPixOnReturn();
+
     const interval = setInterval(() => {
       loadData();
     }, 4000);
-    return () => clearInterval(interval);
-  }, [loadData]);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkPendingPixOnReturn();
+        loadData();
+      }
+    };
+    const handleFocus = () => {
+      checkPendingPixOnReturn();
+      loadData();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [loadData, checkPendingPixOnReturn]);
 
   // Bilhetes pertencentes ao usuário logado ou da sessão
   const myTickets = currentUser 
@@ -361,6 +442,7 @@ export default function Home() {
         {/* Tabela de 10.000 Milhares (0000 a 9999) */}
         <TicketGrid
           soldTickets={bilhetes}
+          reservedTickets={reservedTickets}
           myTickets={myTickets}
           selectedNumbers={selectedNumbers}
           currentUser={currentUser}

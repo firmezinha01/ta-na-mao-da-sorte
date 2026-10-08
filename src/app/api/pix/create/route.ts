@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createPixPayment } from '@/lib/mercadopago';
 import { isSalesCutoffActive } from '@/lib/drawTime';
+import { DatabaseService } from '@/lib/db';
 
 export async function POST(request: Request) {
   try {
@@ -16,7 +17,17 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { amount, tickets, payerEmail, payerName, payerCpf, testMode } = body;
+    const { 
+      amount, 
+      tickets, 
+      payerEmail, 
+      payerName, 
+      payerCpf, 
+      payerWhatsapp, 
+      affiliateCode, 
+      campaign, 
+      testMode 
+    } = body;
 
     if (!tickets || !Array.isArray(tickets) || tickets.length === 0) {
       return NextResponse.json(
@@ -25,18 +36,66 @@ export async function POST(request: Request) {
       );
     }
 
-    const calculatedAmount = tickets.length * 2.00;
+    const sanitizedTickets = [...new Set(tickets.map((t: string) => String(t).trim()))];
+
+    // 1. Verifica se algum dos números já foi adquirido ou está em reserva ativa
+    const [soldTickets, reservedData] = await Promise.all([
+      DatabaseService.getTickets(),
+      DatabaseService.getReservedTickets()
+    ]);
+
+    const soldSet = new Set(soldTickets.map(b => b.numero_milhar));
+    const alreadySold = sanitizedTickets.filter(n => soldSet.has(n));
+    if (alreadySold.length > 0) {
+      return NextResponse.json(
+        { error: `O(s) bilhete(s) ${alreadySold.join(', ')} já foi(ram) adquirido(s). Por favor, escolha outro(s) número(s).` },
+        { status: 409 }
+      );
+    }
+
+    const reservedSet = new Set(reservedData.tickets);
+    const alreadyReserved = sanitizedTickets.filter(n => reservedSet.has(n));
+    if (alreadyReserved.length > 0) {
+      return NextResponse.json(
+        { error: `O(s) bilhete(s) ${alreadyReserved.join(', ')} já está(ão) reservado(s) aguardando pagamento Pix de outro participante.` },
+        { status: 409 }
+      );
+    }
+
+    const calculatedAmount = sanitizedTickets.length * 2.00;
     const finalAmount = amount || calculatedAmount;
 
+    // 2. Gera a cobrança Pix Oficial no Mercado Pago
     const paymentData = await createPixPayment({
       amount: finalAmount,
-      tickets,
-      description: `Tá Na Mão da SORTE - ${tickets.length} bilhete(s): ${tickets.slice(0, 3).join(', ')}${tickets.length > 3 ? '...' : ''}`,
+      tickets: sanitizedTickets,
+      description: `Tá Na Mão da SORTE - ${sanitizedTickets.length} bilhete(s): ${sanitizedTickets.slice(0, 3).join(', ')}${sanitizedTickets.length > 3 ? '...' : ''}`,
       payerEmail,
       payerName,
       payerCpf,
+      payerWhatsapp,
+      affiliateCode,
+      campaign,
       testMode
     });
+
+    // 3. Registra a reserva dos números no banco de dados com validade de 15 minutos
+    const reserveResult = await DatabaseService.createTicketReservation({
+      paymentId: String(paymentData.paymentId),
+      tickets: sanitizedTickets,
+      amount: finalAmount,
+      userName: payerName || 'Participante da Sorte',
+      userCpf: payerCpf || '',
+      userWhatsapp: payerWhatsapp || '',
+      userEmail: payerEmail,
+      affiliateCode,
+      campaign,
+      expiresMinutes: 15
+    });
+
+    if (!reserveResult.success) {
+      console.warn('Alerta na reserva de bilhetes:', reserveResult.error);
+    }
 
     return NextResponse.json(paymentData);
   } catch (error) {

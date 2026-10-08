@@ -61,14 +61,18 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     setLoadingPix(true);
     setPixError('');
     try {
+      const tracking = getAffiliateTracking();
       const response = await fetch('/api/pix/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tickets: selectedNumbers,
           amount: selectedNumbers.length * 2.00,
-          payerName: currentUser?.nome_completo,
-          payerCpf: currentUser?.cpf,
+          payerName: currentUser?.nome_completo || nomeCompleto,
+          payerCpf: currentUser?.cpf || cpf,
+          payerWhatsapp: currentUser?.whatsapp || whatsapp,
+          affiliateCode: tracking?.affiliateCode,
+          campaign: tracking?.campaign,
           testMode
         })
       });
@@ -76,6 +80,19 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       if (response.ok) {
         const data = await response.json();
         setPixData(data);
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('tns_pending_pix', JSON.stringify({
+              paymentId: data.paymentId,
+              tickets: selectedNumbers,
+              amount: selectedNumbers.length * 2.00,
+              userName: currentUser?.nome_completo || nomeCompleto,
+              userCpf: currentUser?.cpf || cpf,
+              userWhatsapp: currentUser?.whatsapp || whatsapp,
+              createdAt: Date.now()
+            }));
+          }
+        } catch {}
       } else {
         const errData = await response.json().catch(() => ({}));
         setPixError(errData.error || 'Não foi possível gerar a cobrança Pix. Tente novamente.');
@@ -133,6 +150,12 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
             if (isPaymentApprovedHandledRef.current) return;
             isPaymentApprovedHandledRef.current = true;
             if (pollingRef.current) clearInterval(pollingRef.current);
+            try {
+              if (typeof window !== 'undefined') {
+                localStorage.removeItem('tns_pending_pix');
+              }
+            } catch {}
+
             sounds.playWinFanfare();
             try {
               confetti({
@@ -145,16 +168,20 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
             }
 
             // Se o participante já está identificado (fluxo padrão), salva diretamente e vai para o sucesso!
-            if (currentUser && currentUser.nome_completo && currentUser.cpf) {
+            const finalNome = currentUser?.nome_completo || nomeCompleto;
+            const finalCpf = currentUser?.cpf || cpf;
+            const finalWhatsapp = currentUser?.whatsapp || whatsapp;
+
+            if (finalNome && finalCpf) {
               try {
                 const tracking = getAffiliateTracking();
                 await fetch('/api/participants', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    nome_completo: currentUser.nome_completo.trim(),
-                    cpf: currentUser.cpf.replace(/\D/g, ''),
-                    whatsapp: currentUser.whatsapp.replace(/\D/g, ''),
+                    nome_completo: finalNome.trim(),
+                    cpf: finalCpf.replace(/\D/g, ''),
+                    whatsapp: finalWhatsapp.replace(/\D/g, ''),
                     tickets: selectedNumbers,
                     paymentId: pixData.paymentId,
                     affiliateCode: tracking?.affiliateCode,
@@ -166,9 +193,9 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
               }
 
               onPaymentComplete({
-                nome_completo: currentUser.nome_completo,
-                cpf: currentUser.cpf,
-                whatsapp: currentUser.whatsapp
+                nome_completo: finalNome,
+                cpf: finalCpf,
+                whatsapp: finalWhatsapp
               });
               setStep('success');
             } else {

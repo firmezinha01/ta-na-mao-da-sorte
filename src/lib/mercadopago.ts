@@ -11,6 +11,9 @@ export interface CreatePixParams {
   payerEmail?: string;
   payerName?: string;
   payerCpf?: string;
+  payerWhatsapp?: string;
+  affiliateCode?: string;
+  campaign?: string;
   testMode?: boolean;
 }
 
@@ -20,6 +23,8 @@ export interface CreatePixParams {
  */
 export async function createPixPayment(params: CreatePixParams): Promise<PixPaymentData> {
   const mpAccessToken = process.env.MP_ACCESS_TOKEN || MP_OFFICIAL_ACCESS_TOKEN;
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.tanamaodasorte.com.br';
+  const notificationUrl = `${siteUrl.replace(/\/+$/, '')}/api/pix/webhook`;
 
   const sanitizedTickets = params.tickets.join(', ');
   const desc = `Tá Na Mão da SORTE - Milhar(es): ${sanitizedTickets}`.slice(0, 100);
@@ -27,12 +32,23 @@ export async function createPixPayment(params: CreatePixParams): Promise<PixPaym
   const firstName = params.payerName?.trim().split(' ')[0] || 'Cliente';
   const lastName = params.payerName?.trim().split(' ').slice(1).join(' ') || 'Sorte';
   const cleanCpf = params.payerCpf ? params.payerCpf.replace(/\D/g, '') : '';
+  const cleanPhone = params.payerWhatsapp ? params.payerWhatsapp.replace(/\D/g, '') : '';
 
   const buildPayload = (includeCpf: boolean) => {
     const payload: Record<string, unknown> = {
       transaction_amount: Number(params.amount.toFixed(2)),
       description: desc,
       payment_method_id: 'pix',
+      notification_url: notificationUrl,
+      external_reference: `TNS-${params.tickets.slice(0, 3).join('-')}-${Date.now()}`,
+      metadata: {
+        tickets: params.tickets,
+        payer_name: params.payerName || '',
+        payer_cpf: cleanCpf,
+        payer_whatsapp: cleanPhone,
+        affiliate_code: params.affiliateCode || '',
+        campaign: params.campaign || 'padrao'
+      },
       payer: {
         email: payerEmail,
         first_name: firstName,
@@ -128,7 +144,7 @@ export async function createPixPayment(params: CreatePixParams): Promise<PixPaym
 export async function checkPaymentStatus(
   paymentId: string,
   forceApprove: boolean = false
-): Promise<{ status: string; statusDetail?: string }> {
+): Promise<{ status: string; statusDetail?: string; paymentData?: any }> {
   if (forceApprove) {
     return { status: 'approved', statusDetail: 'accredited' };
   }
@@ -157,7 +173,8 @@ export async function checkPaymentStatus(
       const data = await response.json();
       return {
         status: data.status,
-        statusDetail: data.status_detail
+        statusDetail: data.status_detail,
+        paymentData: data
       };
     }
   } catch (err) {

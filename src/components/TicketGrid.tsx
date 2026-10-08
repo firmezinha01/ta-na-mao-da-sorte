@@ -22,6 +22,7 @@ import { isSalesCutoffActive } from '@/lib/drawTime';
 
 interface TicketGridProps {
   soldTickets: Bilhete[];
+  reservedTickets?: string[];
   myTickets: Bilhete[];
   selectedNumbers: string[];
   currentUser: Usuario | null;
@@ -36,6 +37,7 @@ const PAGE_SIZE = 100; // 100 números por página para máxima velocidade e flu
 
 export const TicketGrid: React.FC<TicketGridProps> = ({
   soldTickets,
+  reservedTickets = [],
   myTickets,
   selectedNumbers,
   currentUser,
@@ -65,6 +67,10 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
   const soldSet = useMemo(() => {
     return new Set(soldTickets.map(b => b.numero_milhar));
   }, [soldTickets]);
+
+  const reservedSet = useMemo(() => {
+    return new Set(reservedTickets || []);
+  }, [reservedTickets]);
 
   const mySet = useMemo(() => {
     return new Set(myTickets.map(b => b.numero_milhar));
@@ -99,9 +105,10 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
         const numStr = i.toString().padStart(4, '0');
         if (numStr.includes(cleanSearch)) {
           const isSold = soldSet.has(numStr);
+          const isReserved = reservedSet.has(numStr);
           const isMy = mySet.has(numStr);
 
-          if (filterType === 'available' && isSold) continue;
+          if (filterType === 'available' && (isSold || isReserved)) continue;
           if (filterType === 'my' && !isMy) continue;
           if (filterType === 'sold' && !isSold) continue;
 
@@ -120,9 +127,10 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
     for (let i = startRange; i < endRange && i < 10000; i++) {
       const numStr = i.toString().padStart(4, '0');
       const isSold = soldSet.has(numStr);
+      const isReserved = reservedSet.has(numStr);
       const isMy = mySet.has(numStr);
 
-      if (filterType === 'available' && isSold) continue;
+      if (filterType === 'available' && (isSold || isReserved)) continue;
       if (filterType === 'my' && !isMy) continue;
       if (filterType === 'sold' && !isSold) continue;
 
@@ -130,9 +138,9 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
     }
 
     return results;
-  }, [searchTerm, groupIndex, pageIndex, filterType, soldSet, mySet]);
+  }, [searchTerm, groupIndex, pageIndex, filterType, soldSet, reservedSet, mySet]);
 
-  // Função Surpresinha (Gerador da Sorte de milhares aleatórios não vendidos)
+  // Função Surpresinha (Gerador da Sorte de milhares aleatórios não vendidos e não reservados)
   const handleSurpresinha = (quantity: number) => {
     if (!currentUser) {
       onRequireLogin('Para gerar bilhetes da Surpresinha, preencha seu Nome, CPF e WhatsApp antes.');
@@ -143,7 +151,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
 
     for (let i = 0; i < 10000; i++) {
       const numStr = i.toString().padStart(4, '0');
-      if (!soldSet.has(numStr) && !selectedSet.has(numStr)) {
+      if (!soldSet.has(numStr) && !reservedSet.has(numStr) && !selectedSet.has(numStr)) {
         availablePool.push(numStr);
       }
     }
@@ -164,7 +172,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
   };
 
   const handleNumberClick = (numStr: string) => {
-    if (soldSet.has(numStr)) return;
+    if (soldSet.has(numStr) || reservedSet.has(numStr)) return;
     if (!currentUser) {
       onRequireLogin(`Para escolher a milhar ${numStr}, preencha seu Nome, CPF e WhatsApp antes.`);
       return;
@@ -355,6 +363,10 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
               <span>Meu</span>
             </div>
             <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-amber-950/80 border border-amber-500/70" />
+              <span>Reservado</span>
+            </div>
+            <div className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded bg-slate-800/80 border border-slate-700" />
               <span>Vendido</span>
             </div>
@@ -435,6 +447,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
           visibleNumbers.map((numStr) => {
             const isSold = soldSet.has(numStr);
             const isMy = mySet.has(numStr);
+            const isReserved = reservedSet.has(numStr) && !isSold && !isMy;
             const isSelected = selectedSet.has(numStr);
 
             let buttonClass = 'bg-slate-950/80 hover:bg-emerald-950/60 border-emerald-900/60 text-emerald-200 hover:border-emerald-500 shadow-sm';
@@ -443,6 +456,8 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
               buttonClass = 'bg-gradient-to-br from-amber-400 to-yellow-500 border-amber-300 text-slate-950 font-black shadow-lg shadow-amber-500/30 scale-105 z-10';
             } else if (isMy) {
               buttonClass = 'bg-cyan-950/90 border-cyan-500 text-cyan-300 shadow-sm cursor-default';
+            } else if (isReserved) {
+              buttonClass = 'bg-amber-950/30 border-amber-500/50 text-amber-300/60 cursor-not-allowed';
             } else if (isSold) {
               buttonClass = 'bg-slate-900/50 border-slate-800/80 text-slate-600 line-through cursor-not-allowed';
             }
@@ -450,7 +465,7 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
             return (
               <button
                 key={numStr}
-                disabled={isSold}
+                disabled={isSold || isReserved}
                 onClick={() => handleNumberClick(numStr)}
                 className={`relative flex flex-col items-center justify-center py-2 px-1 sm:p-2.5 rounded-xl border text-xs sm:text-base font-mono font-bold transition-all duration-150 transform active:scale-95 min-h-[42px] sm:min-h-[48px] ${buttonClass}`}
                 title={
@@ -458,6 +473,8 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
                     ? `Milhar ${numStr} selecionado para compra`
                     : isMy
                     ? `Milhar ${numStr} já comprado por você!`
+                    : isReserved
+                    ? `Milhar ${numStr} reservada (aguardando pagamento Pix)`
                     : isSold
                     ? `Milhar ${numStr} já vendido`
                     : `Comprar milhar ${numStr} por R$ 2,00`
@@ -474,6 +491,11 @@ export const TicketGrid: React.FC<TicketGridProps> = ({
                 {isMy && (
                   <span className="text-[8px] font-sans font-bold tracking-tight text-cyan-400 uppercase">
                     Meu
+                  </span>
+                )}
+                {isReserved && (
+                  <span className="absolute -top-1 -right-1 text-amber-400 bg-slate-950 rounded-full p-0.5 border border-amber-500/50" title="Reservado no Pix">
+                    <Clock className="w-2.5 h-2.5 animate-pulse" />
                   </span>
                 )}
                 {isSold && (

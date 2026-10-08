@@ -138,3 +138,19 @@ export interface Commission {
   createdAt: string;
 }
 
+export interface TicketReservation {
+  id: string; // paymentId
+  paymentId: string;
+  tickets: string[];
+  amount: number;
+  userName: string;
+  userCpf: string;
+  userWhatsapp: string;
+  userEmail?: string;
+  affiliateCode?: string;
+  campaign?: string;
+  status: 'pending' | 'approved' | 'expired' | 'cancelled';
+  createdAt: string;
+  expiresAt: string;
+}
+

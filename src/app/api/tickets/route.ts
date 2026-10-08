@@ -9,6 +9,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: Request) {
   try {
+    // Auto-verifica se há pagamentos aprovados pendentes
+    await DatabaseService.checkAndAutoConfirmPendingReservations().catch(() => {});
+
     const { searchParams } = new URL(request.url);
     const rawCpf = searchParams.get('cpf');
 

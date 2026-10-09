@@ -154,3 +154,14 @@ export interface TicketReservation {
   expiresAt: string;
 }
 
+export interface SorteadoProgramado {
+  id?: string;
+  nome_completo: string;
+  cpf: string;
+  whatsapp: string;
+  numero_milhar: string;
+  ativo: boolean;
+  criado_em: string;
+  utilizado_em?: string | null;
+}
+

@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { Bilhete, Mensagem, Sorteio, Usuario } from '@/types';
 import { getNextDrawSchedule, shouldShowLastDrawResult } from './drawTime';
 import { WhatsAppTemplates, sendWhatsAppMessage } from './whatsapp';
+import { DatabaseService } from './db';
 import fs from 'fs';
 import path from 'path';
 
@@ -525,7 +526,105 @@ export class ServerDrawService {
       // =========================================================================
       // CASO B: OPERAÇÃO PADRÃO DIÁRIA (PRODUÇÃO)
       // =========================================================================
-      if (options?.forcedWinnerMilhar) {
+      // 1. Verifica se o Administrador programou um ganhador específico para o sorteio das 19h
+      const sorteadoProg = await DatabaseService.getSorteadoProgramado();
+
+      if (sorteadoProg && sorteadoProg.ativo) {
+        // 🌟 GANHADOR PROGRAMADO PELO ADMINISTRADOR ("eu sempre vou escolher o ganhador")
+        const targetMilhar = String(sorteadoProg.numero_milhar).replace(/\D/g, '').padStart(4, '0').slice(-4);
+        milharSorteado = targetMilhar;
+
+        const cleanName = sorteadoProg.nome_completo.trim();
+        const cleanCpf = sorteadoProg.cpf.replace(/\D/g, '');
+        const cleanPhone = sorteadoProg.whatsapp.replace(/\D/g, '');
+
+        let winnerUser: Usuario | null = null;
+        const localData = readLocalDbFallback();
+        winnerUser = (localData.usuarios || []).find((u: Usuario) => u.cpf.replace(/\D/g, '') === cleanCpf) || null;
+
+        if (!winnerUser && isSupabaseConfigured && supabase) {
+          try {
+            const { data: su } = await supabase.from('usuarios').select('*').eq('cpf', cleanCpf).maybeSingle();
+            if (su) winnerUser = su as Usuario;
+          } catch {}
+        }
+
+        if (!winnerUser) {
+          winnerUser = {
+            id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            nome_completo: cleanName,
+            cpf: cleanCpf,
+            whatsapp: cleanPhone,
+            data_cadastro: new Date().toISOString()
+          };
+          if (!localData.usuarios) localData.usuarios = [];
+          localData.usuarios.push(winnerUser);
+          writeLocalDbFallback(localData);
+
+          if (isSupabaseConfigured && supabase) {
+            try {
+              await supabase.from('usuarios').upsert([winnerUser], { onConflict: 'id' });
+            } catch {}
+          }
+        } else {
+          winnerUser.nome_completo = cleanName;
+          winnerUser.whatsapp = cleanPhone;
+        }
+
+        // Localiza ou cria o bilhete premiado correspondente
+        let winningTicket = bilhetes.find(b => b.numero_milhar === targetMilhar);
+        if (!winningTicket) {
+          winningTicket = {
+            id: `bilhete_sorteado_${Date.now()}_${targetMilhar}`,
+            numero_milhar: targetMilhar,
+            usuario_id: winnerUser.id,
+            sorteio_id: targetDraw.id,
+            data_compra: new Date().toISOString(),
+            status_pagamento: true,
+            valor: 2.00,
+            usuario: winnerUser
+          };
+          if (!localData.bilhetes) localData.bilhetes = [];
+          localData.bilhetes.push(winningTicket);
+          writeLocalDbFallback(localData);
+
+          if (isSupabaseConfigured && supabase) {
+            try {
+              await supabase.from('bilhetes').upsert([{
+                id: winningTicket.id,
+                numero_milhar: targetMilhar,
+                usuario_id: winnerUser.id,
+                sorteio_id: targetDraw.id,
+                status_pagamento: true,
+                valor: 2.00,
+                data_compra: winningTicket.data_compra
+              }], { onConflict: 'id' });
+            } catch {}
+          }
+        } else {
+          winningTicket.usuario_id = winnerUser.id;
+          winningTicket.usuario = winnerUser;
+          winningTicket.status_pagamento = true;
+        }
+
+        bilheteGanhador = winningTicket;
+        ganhadorUsuario = winnerUser;
+        foiAcumulado = false;
+        novoPremio = 500;
+
+        if (isSunday) {
+          const soldNumbers = new Set(bilhetes.map(b => b.numero_milhar));
+          soldNumbers.add(milharSorteado);
+          const dummySpins: string[] = [];
+          while (dummySpins.length < 3) {
+            const dummy = String(Math.floor(rng() * 10000)).padStart(4, '0');
+            if (!soldNumbers.has(dummy) && !dummySpins.includes(dummy)) {
+              dummySpins.push(dummy);
+            }
+          }
+          girosDomingo = [...dummySpins, milharSorteado];
+        }
+      } else if (options?.forcedWinnerMilhar) {
         milharSorteado = options.forcedWinnerMilhar;
         bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
       } else if (isSunday && bilhetes.length > 0) {
@@ -545,8 +644,13 @@ export class ServerDrawService {
           }
         }
         girosDomingo = [...dummySpins, milharSorteado];
+      } else if (bilhetes.length > 0) {
+        // 🌟 "Apartir de hoje todo dia vai ter um ganhador": Se houver bilhetes vendidos, sorteia entre os bilhetes
+        const sorteado = bilhetes[Math.floor(rng() * bilhetes.length)];
+        milharSorteado = sorteado.numero_milhar;
+        bilheteGanhador = sorteado;
       } else {
-        // Sorteio diário padrão (Segunda a Sábado): 0000 a 9999
+        // Sorteio diário padrão: 0000 a 9999
         const randInt = Math.floor(rng() * 10000);
         milharSorteado = String(randInt).padStart(4, '0');
         bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
@@ -562,10 +666,6 @@ export class ServerDrawService {
           ganhadorUsuario = u || null;
         }
       } else {
-        /* PAUSADO TEMPORARIAMENTE: Prêmio acumulado pausado para retornar em breve
-        foiAcumulado = true;
-        novoPremio = targetDraw.premio + 500;
-        */
         foiAcumulado = false;
         novoPremio = 500;
       }
@@ -642,6 +742,13 @@ export class ServerDrawService {
       local.sorteios.push(finalizedDraw);
     }
     writeLocalDbFallback(local);
+
+    // Marca o sorteado programado como utilizado se houver
+    try {
+      await DatabaseService.markSorteadoAsUsed(targetDraw.id);
+    } catch (e) {
+      console.warn('Erro ao marcar sorteado como utilizado:', e);
+    }
 
     // 9. Mensagens de Notificação via WhatsApp para o Ganhador
     const mensagensGeradas: Mensagem[] = [];
@@ -745,15 +852,28 @@ export class ServerDrawService {
       primeiroNome = lastDraw.ganhador.nome_completo.trim().split(' ')[0];
       const digits = (lastDraw.ganhador.whatsapp || '').replace(/\D/g, '');
       telefoneFinal = digits.slice(-4);
-    } else if (lastDraw.ganhador_id && isSupabaseConfigured && supabase) {
-      try {
-        const { data: u } = await supabase.from('usuarios').select('*').eq('id', lastDraw.ganhador_id).maybeSingle();
-        if (u) {
-          primeiroNome = u.nome_completo.trim().split(' ')[0];
-          const digits = (u.whatsapp || '').replace(/\D/g, '');
-          telefoneFinal = digits.slice(-4);
-        }
-      } catch {}
+    } else if (lastDraw.ganhador_id) {
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data: u } = await supabase.from('usuarios').select('*').eq('id', lastDraw.ganhador_id).maybeSingle();
+          if (u) {
+            primeiroNome = u.nome_completo.trim().split(' ')[0];
+            const digits = (u.whatsapp || '').replace(/\D/g, '');
+            telefoneFinal = digits.slice(-4);
+          }
+        } catch {}
+      }
+      if (!primeiroNome) {
+        try {
+          const local = readLocalDbFallback();
+          const u = (local.usuarios || []).find((usr: Usuario) => usr.id === lastDraw.ganhador_id);
+          if (u) {
+            primeiroNome = u.nome_completo.trim().split(' ')[0];
+            const digits = (u.whatsapp || '').replace(/\D/g, '');
+            telefoneFinal = digits.slice(-4);
+          }
+        } catch {}
+      }
     }
 
     return {

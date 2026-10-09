@@ -26,10 +26,13 @@ import {
   ChevronRight,
   Crown,
   Play,
-  X
+  X,
+  Trash2,
+  Sparkles,
+  AlertCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Usuario, Bilhete, Sorteio, Mensagem } from '@/types';
+import { Usuario, Bilhete, Sorteio, Mensagem, SorteadoProgramado } from '@/types';
 import { AppStore } from '@/lib/storage';
 import { sounds } from '@/lib/sound';
 import { generateWhatsAppWebLink, maskPhoneNumber } from '@/lib/whatsapp';
@@ -43,8 +46,8 @@ export default function AdminPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
 
-  // Aba ativa: 'overview' | 'tickets' | 'participants' | 'draw' | 'whatsapp' | 'database'
-  const [activeTab, setActiveTab] = useState<'overview' | 'tickets' | 'participants' | 'draw' | 'whatsapp' | 'database'>('overview');
+  // Aba ativa: 'overview' | 'sorteado' | 'tickets' | 'participants' | 'draw' | 'whatsapp' | 'database'
+  const [activeTab, setActiveTab] = useState<'overview' | 'sorteado' | 'tickets' | 'participants' | 'draw' | 'whatsapp' | 'database'>('overview');
 
   // Dados do sistema
   const [participants, setParticipants] = useState<(Usuario & { total_bilhetes?: number })[]>([]);
@@ -52,6 +55,17 @@ export default function AdminPage() {
   const [sorteio, setSorteio] = useState<Sorteio | null>(null);
   const [messages, setMessages] = useState<Mensagem[]>([]);
   const [loadingData, setLoadingData] = useState(false);
+
+  // Estado do Ganhador Sorteado Programado (19h)
+  const [sorteadoProgramado, setSorteadoProgramado] = useState<SorteadoProgramado | null>(null);
+  const [sorteadoForm, setSorteadoForm] = useState({
+    nome_completo: '',
+    cpf: '',
+    whatsapp: '',
+    numero_milhar: ''
+  });
+  const [savingSorteado, setSavingSorteado] = useState(false);
+  const [sorteadoMessage, setSorteadoMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Filtros de busca
   const [searchTerm, setSearchTerm] = useState('');
@@ -114,6 +128,27 @@ export default function AdminPage() {
         setTickets([]);
       }
       setMessages(AppStore.getMensagens());
+
+      // 4. Carrega Ganhador Sorteado Programado (19h)
+      try {
+        const resSorteado = await fetch('/api/admin/sorteado');
+        if (resSorteado.ok) {
+          const sData = await resSorteado.json();
+          if (sData.sorteado && sData.sorteado.ativo) {
+            setSorteadoProgramado(sData.sorteado);
+            setSorteadoForm({
+              nome_completo: sData.sorteado.nome_completo || '',
+              cpf: sData.sorteado.cpf || '',
+              whatsapp: sData.sorteado.whatsapp || '',
+              numero_milhar: sData.sorteado.numero_milhar || ''
+            });
+          } else {
+            setSorteadoProgramado(null);
+          }
+        }
+      } catch (sErr) {
+        console.warn('Erro ao consultar sorteado programado:', sErr);
+      }
     } catch (err) {
       console.error('Erro ao carregar dados do admin:', err);
     } finally {
@@ -231,6 +266,61 @@ export default function AdminPage() {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // Salvar Ganhador Sorteado Programado (19h)
+  const handleSaveSorteado = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSorteado(true);
+    setSorteadoMessage(null);
+    try {
+      const res = await fetch('/api/admin/sorteado', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sorteadoForm)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSorteadoProgramado(data.sorteado);
+        setSorteadoMessage({
+          type: 'success',
+          text: `Ganhador programado com sucesso! A milhar ${data.sorteado.numero_milhar} (${data.sorteado.nome_completo}) sairá no sorteio das 19:00h.`
+        });
+        sounds.playWinFanfare();
+        confetti({ particleCount: 120, spread: 70 });
+        await loadDashboardData();
+      } else {
+        setSorteadoMessage({
+          type: 'error',
+          text: data.error || 'Erro ao salvar ganhador programado.'
+        });
+      }
+    } catch (err) {
+      setSorteadoMessage({
+        type: 'error',
+        text: 'Erro de comunicação com o servidor ao salvar ganhador.'
+      });
+    } finally {
+      setSavingSorteado(false);
+    }
+  };
+
+  // Remover / Cancelar Programação do Ganhador
+  const handleClearSorteado = async () => {
+    if (!confirm('Deseja realmente cancelar a programação do ganhador do sorteio das 19h?')) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/sorteado', { method: 'DELETE' });
+      if (res.ok) {
+        setSorteadoProgramado(null);
+        setSorteadoForm({ nome_completo: '', cpf: '', whatsapp: '', numero_milhar: '' });
+        setSorteadoMessage({ type: 'success', text: 'Programação de ganhador cancelada com sucesso.' });
+        await loadDashboardData();
+      }
+    } catch (err) {
+      console.error('Erro ao cancelar sorteado:', err);
     }
   };
 
@@ -405,6 +495,21 @@ export default function AdminPage() {
           </button>
 
           <button
+            onClick={() => setActiveTab('sorteado')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black whitespace-nowrap transition-all border ${
+              activeTab === 'sorteado'
+                ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/25'
+                : 'bg-slate-900/80 text-amber-300 hover:text-white border-amber-500/40 hover:border-amber-400'
+            }`}
+          >
+            <Crown className="w-4 h-4 text-amber-400" />
+            <span>Sorteado</span>
+            {sorteadoProgramado && sorteadoProgramado.ativo && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5" title="Ganhador programado ativo" />
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('tickets')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ${
               activeTab === 'tickets'
@@ -471,6 +576,57 @@ export default function AdminPage() {
         {activeTab === 'overview' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             
+            {/* Banner de Destaque: Ganhador Sorteado das 19:00h */}
+            <div className={`p-4 sm:p-5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all ${
+              sorteadoProgramado && sorteadoProgramado.ativo
+                ? 'bg-gradient-to-r from-amber-950/50 via-slate-900 to-slate-900 border-amber-500/40 text-amber-200 shadow-lg shadow-amber-950/20'
+                : 'bg-slate-900/80 border-slate-800 text-slate-400'
+            }`}>
+              <div className="flex items-center gap-3.5">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+                  sorteadoProgramado && sorteadoProgramado.ativo
+                    ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-slate-950 shadow-md shadow-amber-500/30'
+                    : 'bg-slate-800 text-slate-400'
+                }`}>
+                  <Crown className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Ganhador das 19:00h
+                    </span>
+                    {sorteadoProgramado && sorteadoProgramado.ativo ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        PROGRAMADO
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">
+                        NÃO DEFINIDO
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-white mt-0.5">
+                    {sorteadoProgramado && sorteadoProgramado.ativo ? (
+                      <span>
+                        Milhar <strong className="text-amber-400 font-mono text-base font-black px-1.5 py-0.5 bg-slate-950 rounded border border-amber-500/30">{sorteadoProgramado.numero_milhar}</strong> • {sorteadoProgramado.nome_completo} ({maskPhoneNumber(sorteadoProgramado.whatsapp)})
+                      </span>
+                    ) : (
+                      'Nenhum apostador programado ainda. Todo dia há um ganhador garantido.'
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('sorteado')}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-colors shrink-0 shadow-md flex items-center justify-center gap-1.5"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>{sorteadoProgramado && sorteadoProgramado.ativo ? 'Gerenciar Sorteado' : 'Definir Sorteado Agora'}</span>
+              </button>
+            </div>
+
             {/* Cards de Métricas */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <button
@@ -557,7 +713,241 @@ export default function AdminPage() {
         )}
 
         {/* ==========================================
-            ABA 2: BILHETES VENDIDOS (TABELA OFICIAL)
+            ABA: SORTEADO (GANHADOR PROGRAMADO DAS 19H)
+        ========================================== */}
+        {activeTab === 'sorteado' && (
+          <div className="space-y-6 animate-in fade-in duration-200 max-w-4xl mx-auto">
+            
+            {/* Header da Seção */}
+            <div className="bg-slate-900 border border-amber-500/30 rounded-3xl p-6 sm:p-8 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-600 flex items-center justify-center text-slate-950 shadow-xl shadow-amber-500/20 shrink-0">
+                    <Crown className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                      Ganhador Garantido Todos os Dias
+                    </span>
+                    <h2 className="text-2xl sm:text-3xl font-black text-white">
+                      Sorteado das 19:00h
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                      A partir de hoje, <strong>todo dia haverá um ganhador</strong>. Preencha os campos abaixo com os dados do apostador e a milhar. O participante e o número preenchidos sairão oficialmente no sorteio das 19:00h!
+                    </p>
+                  </div>
+                </div>
+
+                {sorteadoProgramado && sorteadoProgramado.ativo && (
+                  <button
+                    onClick={handleClearSorteado}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-xs font-bold transition-all shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Remover Programação</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Mensagem de Feedback */}
+            {sorteadoMessage && (
+              <div className={`p-4 rounded-2xl border text-xs sm:text-sm font-semibold flex items-center gap-2.5 animate-in fade-in duration-200 ${
+                sorteadoMessage.type === 'success'
+                  ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+                  : 'bg-red-950/60 border-red-500/50 text-red-300'
+              }`}>
+                {sorteadoMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                )}
+                <span>{sorteadoMessage.text}</span>
+              </div>
+            )}
+
+            {/* Card de Status do Ganhador Programado Ativo */}
+            {sorteadoProgramado && sorteadoProgramado.ativo ? (
+              <div className="bg-gradient-to-br from-slate-900 via-amber-950/20 to-slate-900 border-2 border-amber-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-amber-500/10">
+                <div className="flex items-center justify-between border-b border-amber-500/20 pb-4 mb-6">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-amber-400" />
+                    <h3 className="text-base font-extrabold text-white">
+                      Ganhador Ativo para o Sorteio das 19:00h
+                    </h3>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>CONFIRMADO</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                  <div className="md:col-span-1 bg-slate-950/80 border border-amber-500/30 rounded-2xl p-5 text-center">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400/80">
+                      Milhar Premiada
+                    </span>
+                    <div className="text-5xl font-black font-mono text-amber-400 mt-1 tracking-widest">
+                      {sorteadoProgramado.numero_milhar}
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 block">
+                      Número que sairá no sorteio
+                    </span>
+                  </div>
+
+                  <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Nome Completo
+                      </span>
+                      <p className="text-sm font-bold text-white mt-1 break-words">
+                        {sorteadoProgramado.nome_completo}
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        CPF (apenas números)
+                      </span>
+                      <p className="text-sm font-bold font-mono text-slate-200 mt-1">
+                        {sorteadoProgramado.cpf}
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        WhatsApp com DDD
+                      </span>
+                      <div className="flex items-center justify-between gap-1 mt-1">
+                        <p className="text-sm font-bold font-mono text-emerald-400">
+                          {sorteadoProgramado.whatsapp}
+                        </p>
+                        <a
+                          href={generateWhatsAppWebLink(sorteadoProgramado.whatsapp, `Olá ${sorteadoProgramado.nome_completo}, seu bilhete com a milhar ${sorteadoProgramado.numero_milhar} está confirmado para o sorteio das 19h!`)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1 rounded bg-green-600/20 hover:bg-green-600/30 text-green-300"
+                          title="Abrir no WhatsApp Web"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-slate-400 flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+                <span>
+                  Nenhum ganhador programado atualmente. Preencha o formulário abaixo para definir o participante e a milhar que sairão no sorteio das 19:00h de hoje.
+                </span>
+              </div>
+            )}
+
+            {/* Formulário de Cadastro do Sorteado */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8">
+              <h3 className="text-lg font-black text-white mb-1 flex items-center gap-2">
+                <Crown className="w-5 h-5 text-amber-400" />
+                <span>{sorteadoProgramado && sorteadoProgramado.ativo ? 'Atualizar Dados do Sorteado' : 'Preencher Dados do Sorteado'}</span>
+              </h3>
+              <p className="text-xs text-slate-400 mb-6">
+                Preencha todos os campos obrigatórios (*). O sorteio das 19:00h premiará automaticamente este participante e este número.
+              </p>
+
+              <form onSubmit={handleSaveSorteado} className="space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Campo 1: Nome Completo * */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Nome Completo *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={sorteadoForm.nome_completo}
+                      onChange={(e) => setSorteadoForm(prev => ({ ...prev, nome_completo: e.target.value }))}
+                      placeholder="Ex: Carlos Eduardo Mendes"
+                      className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-amber-400 transition-colors"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block">Nome civil do apostador contemplado</span>
+                  </div>
+
+                  {/* Campo 2: CPF (apenas números) * */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      CPF (apenas números) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={sorteadoForm.cpf}
+                      onChange={(e) => setSorteadoForm(prev => ({ ...prev, cpf: e.target.value.replace(/\D/g, '') }))}
+                      maxLength={11}
+                      placeholder="Ex: 12345678900"
+                      className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono focus:outline-none focus:border-amber-400 transition-colors"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block">11 dígitos numéricos (apenas números)</span>
+                  </div>
+
+                  {/* Campo 3: WhatsApp com DDD * */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      WhatsApp com DDD *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={sorteadoForm.whatsapp}
+                      onChange={(e) => setSorteadoForm(prev => ({ ...prev, whatsapp: e.target.value.replace(/\D/g, '') }))}
+                      maxLength={15}
+                      placeholder="Ex: 11987654321"
+                      className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono focus:outline-none focus:border-amber-400 transition-colors"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block">Número completo com DDD (apenas números)</span>
+                  </div>
+
+                  {/* Campo 4: Milhar * */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Milhar (0000 a 9999) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={sorteadoForm.numero_milhar}
+                      onChange={(e) => setSorteadoForm(prev => ({ ...prev, numero_milhar: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                      maxLength={4}
+                      placeholder="Ex: 1234"
+                      className="w-full px-4 py-3 bg-slate-950 border border-amber-500/40 rounded-xl text-lg font-black font-mono text-center tracking-widest text-amber-400 focus:outline-none focus:border-amber-400 transition-colors"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block text-center">4 dígitos da milhar sorteada (ex: 1234)</span>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="text-xs text-slate-400">
+                    O sorteio oficial ocorre todos os dias às <strong>19:00h</strong>.
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={savingSorteado}
+                    className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    <Crown className="w-4 h-4" />
+                    <span>{savingSorteado ? 'Salvando...' : 'Salvar Ganhador Sorteado'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+          </div>
+        )}
+
+        {/* ==========================================
+            ABA 3: BILHETES VENDIDOS (TABELA OFICIAL)
         ========================================== */}
         {activeTab === 'tickets' && (
           <div className="space-y-4 animate-in fade-in duration-200">
@@ -845,11 +1235,6 @@ export default function AdminPage() {
                       Vencedor: {sorteio.ganhador.nome_completo} ({maskPhoneNumber(sorteio.ganhador.whatsapp)})
                     </p>
                   ) : (
-                    /* PAUSADO TEMPORARIAMENTE: Prêmio acumulou
-                    <p className="text-sm font-bold text-orange-400">
-                      Sem vencedor hoje. Prêmio acumulou para amanhã (+ R$ 500)!
-                    </p>
-                    */
                     <p className="text-sm font-bold text-slate-300">
                       Sem vencedor hoje. Próximo sorteio amanhã às 19:00h com prêmio de R$ 500,00!
                     </p>
@@ -858,6 +1243,46 @@ export default function AdminPage() {
               ) : (
                 <div className="my-6 p-4 rounded-2xl bg-slate-950 border border-slate-800">
                   <p className="text-xs text-slate-400">Sorteio agendado para as 19:00h de hoje.</p>
+                </div>
+              )}
+
+              {/* Indicador de Ganhador Programado */}
+              {sorteadoProgramado && sorteadoProgramado.ativo ? (
+                <div className="my-4 p-4 rounded-2xl bg-gradient-to-r from-amber-950/40 via-yellow-950/20 to-slate-950 border border-amber-500/40 text-left">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                      <Crown className="w-4 h-4" />
+                      <span>Ganhador Programado Ativo (19:00h)</span>
+                    </span>
+                    <button
+                      onClick={() => setActiveTab('sorteado')}
+                      className="text-[10px] font-bold text-amber-300 underline hover:text-white"
+                    >
+                      Alterar
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-3xl font-black font-mono text-amber-400 tracking-widest px-2.5 py-1 bg-slate-950 rounded-xl border border-amber-500/30">
+                      {sorteadoProgramado.numero_milhar}
+                    </div>
+                    <div className="text-xs">
+                      <p className="font-bold text-white">{sorteadoProgramado.nome_completo}</p>
+                      <p className="text-slate-400 font-mono">{sorteadoProgramado.whatsapp}</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-amber-400/90 font-medium mt-2">
+                    👑 Ao executar o sorteio, este apostador e esta milhar sairão 100% vencedores!
+                  </p>
+                </div>
+              ) : (
+                <div className="my-4 p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+                  <span>Nenhum ganhador programado para o sorteio de hoje.</span>
+                  <button
+                    onClick={() => setActiveTab('sorteado')}
+                    className="text-amber-400 font-bold hover:underline text-[11px]"
+                  >
+                    Programar agora →
+                  </button>
                 </div>
               )}
 

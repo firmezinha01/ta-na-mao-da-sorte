@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus, Commission, TicketReservation } from '@/types';
+import { Usuario, Bilhete, Sorteio, Mensagem, Affiliate, AffiliateLink, AffiliateStatus, Commission, TicketReservation, SorteadoProgramado } from '@/types';
 import { WhatsAppTemplates, sendWhatsAppMessage } from './whatsapp';
 import { checkPaymentStatus } from './mercadopago';
 
@@ -18,6 +18,7 @@ interface DatabaseSchema {
   afiliados_links: AffiliateLink[];
   comissoes: Commission[];
   reservas: TicketReservation[];
+  sorteado_programado?: SorteadoProgramado | null;
 }
 
 const DEFAULT_DB: DatabaseSchema = {
@@ -61,7 +62,8 @@ const DEFAULT_DB: DatabaseSchema = {
   afiliados: [],
   afiliados_links: [],
   comissoes: [],
-  reservas: []
+  reservas: [],
+  sorteado_programado: null
 };
 
 /**
@@ -86,6 +88,7 @@ function readLocalDb(): DatabaseSchema {
     if (!parsed.afiliados_links) parsed.afiliados_links = [];
     if (!parsed.comissoes) parsed.comissoes = [];
     if (!parsed.reservas) parsed.reservas = [];
+    if (parsed.sorteado_programado === undefined) parsed.sorteado_programado = null;
     return parsed;
   } catch (err) {
     console.error('Erro ao ler DB local:', err);
@@ -1416,4 +1419,193 @@ export class DatabaseService {
 
     return confirmedCount;
   }
+
+  /**
+   * Retorna o ganhador programado ativo para o sorteio das 19h
+   */
+  static async getSorteadoProgramado(): Promise<SorteadoProgramado | null> {
+    const localDb = readLocalDb();
+    if (localDb.sorteado_programado && localDb.sorteado_programado.ativo) {
+      return localDb.sorteado_programado;
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('sorteado_programado')
+          .select('*')
+          .eq('ativo', true)
+          .order('criado_em', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!error && data) {
+          return data as SorteadoProgramado;
+        }
+      } catch (e) {
+        // Fallback para banco local caso tabela não exista no Supabase
+      }
+    }
+
+    return (localDb.sorteado_programado && localDb.sorteado_programado.ativo) ? localDb.sorteado_programado : null;
+  }
+
+  /**
+   * Salva e programa o ganhador que sairá no sorteio das 19h.
+   * Cadastra o participante e seu bilhete premiado de forma oficial e atômica.
+   */
+  static async saveSorteadoProgramado(data: {
+    nome_completo: string;
+    cpf: string;
+    whatsapp: string;
+    numero_milhar: string;
+  }): Promise<SorteadoProgramado> {
+    const cleanName = data.nome_completo.trim();
+    const cleanCpf = data.cpf.replace(/\D/g, '');
+    const cleanPhone = data.whatsapp.replace(/\D/g, '');
+    const cleanMilhar = String(data.numero_milhar).replace(/\D/g, '').padStart(4, '0').slice(-4);
+
+    const localDb = readLocalDb();
+
+    // 1. Localiza ou cria o usuário oficial
+    let user = localDb.usuarios.find(u => u.cpf.replace(/\D/g, '') === cleanCpf);
+    if (!user) {
+      user = {
+        id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        nome_completo: cleanName,
+        cpf: cleanCpf,
+        whatsapp: cleanPhone,
+        data_cadastro: new Date().toISOString()
+      };
+      localDb.usuarios.push(user);
+    } else {
+      user.nome_completo = cleanName;
+      user.whatsapp = cleanPhone;
+    }
+
+    // 2. Localiza o sorteio ativo oficial
+    let drawId = 'sorteio_hoje';
+    const activeDraw = localDb.sorteios.find(s => s.status === 'agendado' || s.status === 'em_andamento') || localDb.sorteios[localDb.sorteios.length - 1];
+    if (activeDraw) {
+      drawId = activeDraw.id;
+    }
+
+    // 3. Garante que o bilhete desta milhar existe e pertence a este participante
+    let ticket = (localDb.bilhetes || []).find(b => b.sorteio_id === drawId && b.numero_milhar === cleanMilhar);
+    if (!ticket) {
+      ticket = {
+        id: `bilhete_prog_${Date.now()}_${cleanMilhar}`,
+        numero_milhar: cleanMilhar,
+        usuario_id: user.id,
+        sorteio_id: drawId,
+        data_compra: new Date().toISOString(),
+        status_pagamento: true,
+        valor: 2.00,
+        usuario: user
+      };
+      if (!localDb.bilhetes) localDb.bilhetes = [];
+      localDb.bilhetes.push(ticket);
+    } else {
+      ticket.usuario_id = user.id;
+      ticket.usuario = user;
+      ticket.status_pagamento = true;
+    }
+
+    // 4. Salva a programação oficial
+    const sorteado: SorteadoProgramado = {
+      id: `sorteado_${Date.now()}`,
+      nome_completo: cleanName,
+      cpf: cleanCpf,
+      whatsapp: cleanPhone,
+      numero_milhar: cleanMilhar,
+      ativo: true,
+      criado_em: new Date().toISOString(),
+      utilizado_em: null
+    };
+
+    localDb.sorteado_programado = sorteado;
+    writeLocalDb(localDb);
+
+    // 5. Persiste no Supabase se configurado
+    if (isSupabaseConfigured && supabase) {
+      try {
+        // Upsert participante
+        await supabase.from('usuarios').upsert([
+          {
+            id: user.id,
+            nome_completo: cleanName,
+            cpf: cleanCpf,
+            whatsapp: cleanPhone,
+            data_cadastro: user.data_cadastro
+          }
+        ], { onConflict: 'id' });
+
+        // Upsert bilhete premiado
+        await supabase.from('bilhetes').upsert([
+          {
+            id: ticket.id,
+            numero_milhar: cleanMilhar,
+            usuario_id: user.id,
+            sorteio_id: drawId,
+            status_pagamento: true,
+            valor: 2.00,
+            data_compra: ticket.data_compra
+          }
+        ], { onConflict: 'id' });
+
+        // Upsert na tabela sorteado_programado caso exista
+        await supabase.from('sorteado_programado').upsert([sorteado], { onConflict: 'id' });
+      } catch (err) {
+        console.warn('Erro ao sincronizar sorteado_programado no Supabase:', err);
+      }
+    }
+
+    return sorteado;
+  }
+
+  /**
+   * Remove ou desativa a programação de ganhador
+   */
+  static async clearSorteadoProgramado(): Promise<void> {
+    const localDb = readLocalDb();
+    if (localDb.sorteado_programado) {
+      localDb.sorteado_programado.ativo = false;
+      writeLocalDb(localDb);
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase
+          .from('sorteado_programado')
+          .update({ ativo: false })
+          .eq('ativo', true);
+      } catch (err) {
+        console.warn('Erro ao desativar sorteado no Supabase:', err);
+      }
+    }
+  }
+
+  /**
+   * Marca o sorteado programado como já utilizado após o sorteio ser concluído
+   */
+  static async markSorteadoAsUsed(drawId: string): Promise<void> {
+    const localDb = readLocalDb();
+    if (localDb.sorteado_programado) {
+      localDb.sorteado_programado.ativo = false;
+      localDb.sorteado_programado.utilizado_em = drawId;
+      writeLocalDb(localDb);
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase
+          .from('sorteado_programado')
+          .update({ ativo: false, utilizado_em: drawId })
+          .eq('ativo', true);
+      } catch (err) {
+        console.warn('Erro ao atualizar sorteado_programado como utilizado no Supabase:', err);
+      }
+    }
+  }
 }
+

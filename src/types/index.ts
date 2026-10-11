@@ -115,7 +115,7 @@ export interface AffiliateLink {
   createdAt: string;
 }
 
-export type CommissionStatus = 'pendente' | 'disponivel' | 'pago' | 'cancelado' | 'aprovada' | 'em_analise';
+export type CommissionStatus = 'pendente' | 'em_analise' | 'aprovada' | 'disponivel' | 'paga' | 'pago' | 'cancelada' | 'cancelado';
 
 export interface Commission {
   id: string;
@@ -132,6 +132,7 @@ export interface Commission {
   availableAt?: string;
   paidAt?: string;
   buyerName?: string;
+  buyerFirstName?: string;
   buyerCpf?: string;
   ticketsCount?: number;
   tickets?: string[];

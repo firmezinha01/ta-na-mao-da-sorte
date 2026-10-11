@@ -29,7 +29,38 @@ export async function GET(request: Request) {
     }
 
     const aff = await DatabaseService.getAffiliateByIdOrDoc(identifier);
-    const commissions = await DatabaseService.getCommissions(aff?.exclusiveCode || identifier);
+    const rawCommissions = await DatabaseService.getCommissions(aff?.exclusiveCode || aff?.id || identifier);
+
+    const enrichedCommissions = rawCommissions.map(c => {
+      let buyerFirstName = c.buyerFirstName;
+      if (!buyerFirstName) {
+        if (c.buyerName && c.buyerName.trim()) {
+          buyerFirstName = c.buyerName.trim().split(' ')[0];
+        } else {
+          buyerFirstName = 'Cliente';
+        }
+      }
+      return {
+        ...c,
+        buyerFirstName
+      };
+    });
+
+    const dynamicPending = enrichedCommissions
+      .filter(c => c.status === 'pendente' || c.status === 'aprovada' || c.status === 'em_analise')
+      .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+    const dynamicAvailable = enrichedCommissions
+      .filter(c => c.status === 'disponivel')
+      .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+    const dynamicPaid = enrichedCommissions
+      .filter(c => c.status === 'pago')
+      .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+    const dynamicConversions = enrichedCommissions.filter(c => c.status !== 'cancelado' && c.status !== 'cancelada').length;
+
+    const finalPending = Math.max(aff?.balancePending || 0, Number(dynamicPending.toFixed(2)));
+    const finalAvailable = Math.max(aff?.balanceAvailable || 0, Number(dynamicAvailable.toFixed(2)));
+    const finalPaid = Math.max(aff?.balancePaid || 0, Number(dynamicPaid.toFixed(2)));
+    const finalConversions = Math.max(aff?.totalConversions || 0, dynamicConversions);
 
     return NextResponse.json({
       success: true,
@@ -39,13 +70,13 @@ export async function GET(request: Request) {
         exclusiveCode: aff.exclusiveCode,
         status: aff.status,
         commissionRate: aff.commissionRate,
-        balanceAvailable: aff.balanceAvailable || 0,
-        balancePending: aff.balancePending || 0,
-        balancePaid: aff.balancePaid || 0,
+        balanceAvailable: finalAvailable,
+        balancePending: finalPending,
+        balancePaid: finalPaid,
         totalClicks: aff.totalClicks || 0,
-        totalConversions: aff.totalConversions || 0
+        totalConversions: finalConversions
       } : null,
-      commissions
+      commissions: enrichedCommissions
     });
   } catch (error: any) {
     console.error('Erro na API de comissões de afiliados:', error);

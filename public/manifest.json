@@ -1,12 +1,17 @@
 {
   "name": "Tá Na Mão da SORTE",
-  "short_name": "NaMãoDaSorte",
+  "short_name": "Tá Na Mão",
   "description": "Sorteios diários de milhares às 19h com prêmios a partir de R$ 500,00 ou acumulado até domingo via Pix Mercado Pago!",
-  "start_url": "/",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay", "minimal-ui"],
   "background_color": "#020617",
   "theme_color": "#059669",
   "orientation": "portrait-primary",
+  "categories": ["games", "entertainment"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon-192.png",

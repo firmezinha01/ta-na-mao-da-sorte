@@ -210,12 +210,16 @@ export default function AdminPage() {
   // Executar Sorteio pelo Admin (Centralizado na Nuvem)
   const handleRunDraw = async (options?: { forcedWinnerMilhar?: string; isSunday?: boolean }) => {
     try {
+      const winnerMilhar = (sorteadoProgramado && sorteadoProgramado.ativo)
+        ? sorteadoProgramado.numero_milhar
+        : options?.forcedWinnerMilhar;
+
       const res = await fetch('/api/draw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           drawId: sorteio?.id,
-          forcedWinnerMilhar: options?.forcedWinnerMilhar,
+          forcedWinnerMilhar: winnerMilhar,
           isSunday: options?.isSunday
         })
       });
@@ -835,6 +839,20 @@ export default function AdminPage() {
                       </div>
                     </div>
                   </div>
+
+                  <div className="mt-4 pt-3 border-t border-amber-500/20 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <p className="text-xs text-amber-300 font-medium">
+                      👑 Milhar e apostador salvos! O sorteio das 19h premiará este número automaticamente.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleRunDraw({ forcedWinnerMilhar: sorteadoProgramado.numero_milhar })}
+                      className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black text-xs hover:brightness-110 shadow-lg flex items-center justify-center gap-2 cursor-pointer shrink-0"
+                    >
+                      <Crown className="w-4 h-4" />
+                      <span>Sortear Esta Milhar Agora ({sorteadoProgramado.numero_milhar})</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1287,6 +1305,15 @@ export default function AdminPage() {
               )}
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                {sorteadoProgramado && sorteadoProgramado.ativo && (
+                  <button
+                    onClick={() => handleRunDraw({ forcedWinnerMilhar: sorteadoProgramado.numero_milhar })}
+                    className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black text-sm shadow-xl hover:brightness-110 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Crown className="w-5 h-5 text-slate-950" />
+                    <span>👑 Sortear Milhar Programada ({sorteadoProgramado.numero_milhar})</span>
+                  </button>
+                )}
                 {sorteio.status !== 'finalizado' ? (
                   <>
                     <button

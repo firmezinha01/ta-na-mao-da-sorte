@@ -259,15 +259,19 @@ export class DatabaseService {
     }
 
     let commission: Commission | undefined = undefined;
-    if (params.affiliateCode && newTickets.length > 0) {
+    const totalTicketsCount = params.tickets && params.tickets.length > 0 ? params.tickets.length : newTickets.length;
+    const finalTicketsList = params.tickets && params.tickets.length > 0 ? params.tickets : newTickets.map(t => t.numero_milhar);
+
+    if (params.affiliateCode && totalTicketsCount > 0) {
       try {
         const saleResult = await this.recordAffiliateSale({
           affiliateCode: params.affiliateCode,
-          orderAmount: newTickets.length * 2.00,
-          ticketsCount: newTickets.length,
-          tickets: newTickets.map(t => t.numero_milhar),
+          orderAmount: totalTicketsCount * 2.00,
+          ticketsCount: totalTicketsCount,
+          tickets: finalTicketsList,
           buyerName: user.nome_completo,
           buyerCpf: user.cpf,
+          paymentId: params.paymentId,
           campaign: params.campaign
         });
         if (saleResult.success && saleResult.commission) {
@@ -743,6 +747,30 @@ export class DatabaseService {
                 (row.document_number && a.documentNumber.replace(/\D/g, '') === row.document_number)
               );
 
+              const allCommissions = localDb.comissoes || [];
+              const affCode = (row.exclusive_code || localAff?.exclusiveCode || '').toUpperCase();
+              const affId = (row.id || localAff?.id || '').toUpperCase();
+              const affComms = allCommissions.filter(c =>
+                (c.affiliateId && c.affiliateId.toUpperCase() === affId) ||
+                (c.affiliateCode && c.affiliateCode.toUpperCase() === affCode)
+              );
+
+              const dynamicPending = affComms
+                .filter(c => c.status === 'pendente' || c.status === 'aprovada' || c.status === 'em_analise')
+                .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+              const dynamicAvailable = affComms
+                .filter(c => c.status === 'disponivel')
+                .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+              const dynamicPaid = affComms
+                .filter(c => c.status === 'pago')
+                .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+              const dynamicConversions = affComms.filter(c => c.status !== 'cancelado' && c.status !== 'cancelada').length;
+
+              const finalPending = Math.max(Number(row.balance_pending ?? localAff?.balancePending ?? 0), Number(dynamicPending.toFixed(2)));
+              const finalAvailable = Math.max(Number(row.balance_available ?? localAff?.balanceAvailable ?? 0), Number(dynamicAvailable.toFixed(2)));
+              const finalPaid = Math.max(Number(row.balance_paid ?? localAff?.balancePaid ?? 0), Number(dynamicPaid.toFixed(2)));
+              const finalConversions = Math.max(Number(row.total_conversions ?? localAff?.totalConversions ?? 0), dynamicConversions);
+
               return {
                 id: row.id,
                 fullName: row.full_name || row.fullName || localAff?.fullName || row.email.split('@')[0],
@@ -763,11 +791,11 @@ export class DatabaseService {
                 pixKey: row.pix_key || localAff?.pixKey || row.document_number,
                 socialChannels: row.social_channels || localAff?.socialChannels || '',
                 promotionStrategy: row.promotion_strategy || localAff?.promotionStrategy || '',
-                balanceAvailable: Number(row.balance_available ?? localAff?.balanceAvailable ?? 0),
-                balancePending: Number(row.balance_pending ?? localAff?.balancePending ?? 0),
-                balancePaid: Number(row.balance_paid ?? localAff?.balancePaid ?? 0),
+                balanceAvailable: finalAvailable,
+                balancePending: finalPending,
+                balancePaid: finalPaid,
                 totalClicks: Number(row.total_clicks ?? localAff?.totalClicks ?? 0),
-                totalConversions: Number(row.total_conversions ?? localAff?.totalConversions ?? 0),
+                totalConversions: finalConversions,
                 termsAcceptedAt: row.terms_accepted_at || localAff?.termsAcceptedAt || new Date().toISOString(),
                 privacyAcceptedAt: row.privacy_accepted_at || localAff?.privacyAcceptedAt || new Date().toISOString(),
                 createdAt: row.created_at || localAff?.createdAt || new Date().toISOString(),
@@ -782,7 +810,33 @@ export class DatabaseService {
     }
 
     const localDb = readLocalDb();
-    return localDb.afiliados || [];
+    const allCommissions = localDb.comissoes || [];
+    return (localDb.afiliados || []).map(aff => {
+      const affCode = (aff.exclusiveCode || '').toUpperCase();
+      const affId = (aff.id || '').toUpperCase();
+      const affComms = allCommissions.filter(c =>
+        (c.affiliateId && c.affiliateId.toUpperCase() === affId) ||
+        (c.affiliateCode && c.affiliateCode.toUpperCase() === affCode)
+      );
+      const dynamicPending = affComms
+        .filter(c => c.status === 'pendente' || c.status === 'aprovada' || c.status === 'em_analise')
+        .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+      const dynamicAvailable = affComms
+        .filter(c => c.status === 'disponivel')
+        .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+      const dynamicPaid = affComms
+        .filter(c => c.status === 'pago')
+        .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+      const dynamicConversions = affComms.filter(c => c.status !== 'cancelado' && c.status !== 'cancelada').length;
+
+      return {
+        ...aff,
+        balancePending: Math.max(aff.balancePending || 0, Number(dynamicPending.toFixed(2))),
+        balanceAvailable: Math.max(aff.balanceAvailable || 0, Number(dynamicAvailable.toFixed(2))),
+        balancePaid: Math.max(aff.balancePaid || 0, Number(dynamicPaid.toFixed(2))),
+        totalConversions: Math.max(aff.totalConversions || 0, dynamicConversions)
+      };
+    });
   }
 
   /**
@@ -848,6 +902,31 @@ export class DatabaseService {
             (docNumber && a.documentNumber.replace(/\D/g, '') === docNumber)
           );
 
+          // Calcula comissões dinâmicas do afiliado para garantir que nunca fiquem zeradas
+          const allCommissions = localDb.comissoes || [];
+          const affCode = (row.exclusive_code || localAff?.exclusiveCode || clean).toUpperCase();
+          const affId = (row.id || localAff?.id || identifier).toUpperCase();
+          const affComms = allCommissions.filter(c =>
+            (c.affiliateId && c.affiliateId.toUpperCase() === affId) ||
+            (c.affiliateCode && c.affiliateCode.toUpperCase() === affCode)
+          );
+
+          const dynamicPending = affComms
+            .filter(c => c.status === 'pendente' || c.status === 'aprovada' || c.status === 'em_analise')
+            .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+          const dynamicAvailable = affComms
+            .filter(c => c.status === 'disponivel')
+            .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+          const dynamicPaid = affComms
+            .filter(c => c.status === 'pago')
+            .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+          const dynamicConversions = affComms.filter(c => c.status !== 'cancelado' && c.status !== 'cancelada').length;
+
+          const finalPending = Math.max(Number(localAff?.balancePending ?? row.balance_pending ?? 0), Number(dynamicPending.toFixed(2)));
+          const finalAvailable = Math.max(Number(localAff?.balanceAvailable ?? row.balance_available ?? 0), Number(dynamicAvailable.toFixed(2)));
+          const finalPaid = Math.max(Number(localAff?.balancePaid ?? row.balance_paid ?? 0), Number(dynamicPaid.toFixed(2)));
+          const finalConversions = Math.max(Number(localAff?.totalConversions ?? row.total_conversions ?? 0), dynamicConversions);
+
           const resolvedAff: Affiliate = {
             id: row.id,
             fullName: resolvedName || localAff?.fullName || row.email.split('@')[0],
@@ -868,11 +947,11 @@ export class DatabaseService {
             pixKey: row.pix_key || localAff?.pixKey || docNumber,
             socialChannels: row.social_channels || localAff?.socialChannels || '',
             promotionStrategy: row.promotion_strategy || localAff?.promotionStrategy || '',
-            balanceAvailable: Number(localAff?.balanceAvailable ?? row.balance_available ?? 0),
-            balancePending: Number(localAff?.balancePending ?? row.balance_pending ?? 0),
-            balancePaid: Number(localAff?.balancePaid ?? row.balance_paid ?? 0),
+            balanceAvailable: finalAvailable,
+            balancePending: finalPending,
+            balancePaid: finalPaid,
             totalClicks: Number(localAff?.totalClicks ?? row.total_clicks ?? 0),
-            totalConversions: Number(localAff?.totalConversions ?? row.total_conversions ?? 0),
+            totalConversions: finalConversions,
             termsAcceptedAt: row.terms_accepted_at || localAff?.termsAcceptedAt || new Date().toISOString(),
             privacyAcceptedAt: row.privacy_accepted_at || localAff?.privacyAcceptedAt || new Date().toISOString(),
             createdAt: row.created_at || localAff?.createdAt || new Date().toISOString(),
@@ -899,7 +978,33 @@ export class DatabaseService {
       a.documentNumber.replace(/\D/g, '') === cleanDoc ||
       a.exclusiveCode.toUpperCase() === clean.toUpperCase()
     );
-    return aff || null;
+    if (!aff) return null;
+
+    const allCommissions = localDb.comissoes || [];
+    const affCode = (aff.exclusiveCode || '').toUpperCase();
+    const affId = (aff.id || '').toUpperCase();
+    const affComms = allCommissions.filter(c =>
+      (c.affiliateId && c.affiliateId.toUpperCase() === affId) ||
+      (c.affiliateCode && c.affiliateCode.toUpperCase() === affCode)
+    );
+    const dynamicPending = affComms
+      .filter(c => c.status === 'pendente' || c.status === 'aprovada' || c.status === 'em_analise')
+      .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+    const dynamicAvailable = affComms
+      .filter(c => c.status === 'disponivel')
+      .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+    const dynamicPaid = affComms
+      .filter(c => c.status === 'pago')
+      .reduce((acc, c) => acc + (c.commissionAmount || 0), 0);
+    const dynamicConversions = affComms.filter(c => c.status !== 'cancelado' && c.status !== 'cancelada').length;
+
+    return {
+      ...aff,
+      balancePending: Math.max(aff.balancePending || 0, Number(dynamicPending.toFixed(2))),
+      balanceAvailable: Math.max(aff.balanceAvailable || 0, Number(dynamicAvailable.toFixed(2))),
+      balancePaid: Math.max(aff.balancePaid || 0, Number(dynamicPaid.toFixed(2))),
+      totalConversions: Math.max(aff.totalConversions || 0, dynamicConversions)
+    };
   }
 
   /**
@@ -997,6 +1102,7 @@ export class DatabaseService {
     buyerName: string;
     buyerCpf: string;
     campaign?: string;
+    paymentId?: string;
   }): Promise<{ success: boolean; commission?: Commission; message?: string }> {
     const cleanAffCode = params.affiliateCode.trim().toUpperCase();
     const aff = await this.getAffiliateByIdOrDoc(cleanAffCode);
@@ -1019,12 +1125,30 @@ export class DatabaseService {
       return { success: false, message: 'Auto-compra detectada. Comissões para compra própria não são permitidas.' };
     }
 
+    const localDb = readLocalDb();
+    if (!localDb.comissoes) localDb.comissoes = [];
+
+    // Deduplicação: se já existe comissão para este pagamento/conversão, não duplica
+    if (params.paymentId) {
+      const existingComm = localDb.comissoes.find(c =>
+        c.conversionId === `conv_${params.paymentId}` ||
+        c.conversionId === params.paymentId ||
+        c.id === `comm_${params.paymentId}` ||
+        c.id === params.paymentId
+      );
+      if (existingComm) {
+        console.log(`[Afiliados] Comissão para o pagamento ${params.paymentId} já computada anteriormente. Retornando existente.`);
+        return { success: true, commission: existingComm };
+      }
+    }
+
     const rate = aff.commissionRate || 0.15;
     const commissionValue = Number((params.orderAmount * rate).toFixed(2));
+    const buyerFirstName = (params.buyerName || '').trim().split(' ')[0] || 'Cliente';
 
     const newCommission: Commission = {
-      id: `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      conversionId: `conv_${Date.now()}`,
+      id: params.paymentId ? `comm_${params.paymentId}` : `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      conversionId: params.paymentId ? `conv_${params.paymentId}` : `conv_${Date.now()}`,
       affiliateId: aff.id,
       affiliateCode: aff.exclusiveCode,
       affiliateName: aff.fullName,
@@ -1034,14 +1158,13 @@ export class DatabaseService {
       campaign: params.campaign || 'padrao',
       status: 'pendente',
       buyerName: params.buyerName,
+      buyerFirstName,
       buyerCpf: params.buyerCpf,
       ticketsCount: params.ticketsCount,
       tickets: params.tickets,
       createdAt: new Date().toISOString()
     };
 
-    const localDb = readLocalDb();
-    if (!localDb.comissoes) localDb.comissoes = [];
     localDb.comissoes.unshift(newCommission);
 
     // Garante presença do afiliado e atualiza saldo
@@ -1072,6 +1195,23 @@ export class DatabaseService {
     }
 
     writeLocalDb(localDb);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const updatedAff = localDb.afiliados[affIdx !== -1 ? affIdx : 0];
+        await supabase
+          .from('afiliados')
+          .update({
+            balance_pending: updatedAff.balancePending,
+            total_conversions: updatedAff.totalConversions
+          })
+          .eq('id', aff.id);
+      } catch (sbErr) {
+        console.warn('Erro ao atualizar saldo de afiliado no Supabase:', sbErr);
+      }
+    }
+
+    console.log(`[Afiliados] Comissão de R$ ${commissionValue.toFixed(2)} salva com sucesso para ${aff.fullName} (${aff.exclusiveCode})! Comprador: ${buyerFirstName}`);
 
     return {
       success: true,
@@ -1129,9 +1269,21 @@ export class DatabaseService {
     }
 
     const clean = affiliateIdOrCode.trim().toUpperCase();
+    const aff = (localDb.afiliados || []).find(a =>
+      a.id.toUpperCase() === clean ||
+      a.exclusiveCode.toUpperCase() === clean ||
+      (a.email && a.email.toUpperCase() === clean)
+    );
+
+    const validIds = new Set<string>([clean]);
+    if (aff) {
+      if (aff.id) validIds.add(aff.id.toUpperCase());
+      if (aff.exclusiveCode) validIds.add(aff.exclusiveCode.toUpperCase());
+    }
+
     return list.filter(c =>
-      (c.affiliateId && c.affiliateId.toUpperCase() === clean) ||
-      (c.affiliateCode && c.affiliateCode.toUpperCase() === clean)
+      (c.affiliateId && validIds.has(c.affiliateId.toUpperCase())) ||
+      (c.affiliateCode && validIds.has(c.affiliateCode.toUpperCase()))
     );
   }
 
@@ -1341,9 +1493,14 @@ export class DatabaseService {
       campaign: reservation.campaign
     });
 
-    // Atualiza status da reserva para aprovado
-    reservation.status = 'approved';
-    writeLocalDb(localDb);
+    // Atualiza status da reserva para aprovado no banco de dados mais atualizado (sem sobrescrever comissões)
+    const freshDb = readLocalDb();
+    if (!freshDb.reservas) freshDb.reservas = [];
+    const resIdx = freshDb.reservas.findIndex(r => r.paymentId === paymentId || r.id === paymentId);
+    if (resIdx !== -1) {
+      freshDb.reservas[resIdx].status = 'approved';
+    }
+    writeLocalDb(freshDb);
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -1413,8 +1570,19 @@ export class DatabaseService {
       }
     }
 
-    if (confirmedCount > 0) {
-      writeLocalDb(localDb);
+    const hasExpiredChanges = pendings.some(r => r.status === 'expired');
+    if (hasExpiredChanges) {
+      const freshDb = readLocalDb();
+      if (!freshDb.reservas) freshDb.reservas = [];
+      for (const res of pendings) {
+        if (res.status === 'expired') {
+          const idx = freshDb.reservas.findIndex(r => r.id === res.id || r.paymentId === res.paymentId);
+          if (idx !== -1 && freshDb.reservas[idx].status === 'pending') {
+            freshDb.reservas[idx].status = 'expired';
+          }
+        }
+      }
+      writeLocalDb(freshDb);
     }
 
     return confirmedCount;
@@ -1483,12 +1651,24 @@ export class DatabaseService {
       user.whatsapp = cleanPhone;
     }
 
-    // 2. Localiza o sorteio ativo oficial
-    let drawId = 'sorteio_hoje';
-    const activeDraw = localDb.sorteios.find(s => s.status === 'agendado' || s.status === 'em_andamento') || localDb.sorteios[localDb.sorteios.length - 1];
-    if (activeDraw) {
-      drawId = activeDraw.id;
+    // 2. Localiza ou cria o sorteio ativo oficial agendado
+    let activeDraw = localDb.sorteios.find(s => s.status === 'agendado' || s.status === 'em_andamento');
+    if (!activeDraw) {
+      const newDraw: Sorteio = {
+        id: `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        data_sorteio: new Date(new Date().setHours(19, 0, 0, 0)).toISOString(),
+        numeros_sorteados: null,
+        ganhador_id: null,
+        premio: 500,
+        acumulado: false,
+        status: 'agendado',
+        eh_domingo: new Date().getDay() === 0
+      };
+      if (!localDb.sorteios) localDb.sorteios = [];
+      localDb.sorteios.push(newDraw);
+      activeDraw = newDraw;
     }
+    const drawId = activeDraw.id;
 
     // 3. Garante que o bilhete desta milhar existe e pertence a este participante
     let ticket = (localDb.bilhetes || []).find(b => b.sorteio_id === drawId && b.numero_milhar === cleanMilhar);

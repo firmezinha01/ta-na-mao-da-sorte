@@ -15,33 +15,47 @@ import {
   CheckCircle2,
   Clock,
   Ban,
-  Wallet
+  Wallet,
+  RefreshCw
 } from 'lucide-react';
 
 export const ReportsPage: React.FC = () => {
   const { currentAffiliate } = useAuth();
   const affiliateId = currentAffiliate?.id;
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [commissions, setCommissions] = useState(() =>
     MockDatabase.getCommissions().filter(c => c.affiliateId === affiliateId || (currentAffiliate?.exclusiveCode && c.affiliateCode === currentAffiliate.exclusiveCode))
   );
 
-  useEffect(() => {
-    if (currentAffiliate?.exclusiveCode || currentAffiliate?.id) {
-      fetch(`/api/afiliados/commissions?affiliateCode=${currentAffiliate.exclusiveCode}&affiliateId=${currentAffiliate.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.success && data.commissions) {
-            setCommissions(data.commissions);
-            const allComms = MockDatabase.getCommissions().filter(c =>
-              c.affiliateId !== currentAffiliate.id && c.affiliateCode !== currentAffiliate.exclusiveCode
-            );
-            MockDatabase.saveCommissions([...data.commissions, ...allComms]);
-          }
-        })
-        .catch(console.warn);
+  const fetchCommissionsData = async () => {
+    if (!currentAffiliate?.exclusiveCode && !currentAffiliate?.id) return;
+    try {
+      const res = await fetch(`/api/afiliados/commissions?affiliateCode=${currentAffiliate.exclusiveCode || ''}&affiliateId=${currentAffiliate.id || ''}`);
+      const data = await res.json();
+      if (data.success && data.commissions) {
+        setCommissions(data.commissions);
+        const allComms = MockDatabase.getCommissions().filter(c =>
+          c.affiliateId !== currentAffiliate.id && c.affiliateCode !== currentAffiliate.exclusiveCode
+        );
+        MockDatabase.saveCommissions([...data.commissions, ...allComms]);
+      }
+    } catch (e) {
+      console.warn('Erro ao atualizar comissões:', e);
     }
+  };
+
+  useEffect(() => {
+    fetchCommissionsData();
+    const interval = setInterval(fetchCommissionsData, 8000);
+    return () => clearInterval(interval);
   }, [currentAffiliate?.id, currentAffiliate?.exclusiveCode]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchCommissionsData();
+    setTimeout(() => setIsRefreshing(false), 600);
+  };
 
   const links = useMemo(() => {
     return MockDatabase.getLinks().filter(l => l.affiliateId === affiliateId);
@@ -58,15 +72,17 @@ export const ReportsPage: React.FC = () => {
     let available = 0;
     let paid = 0;
     let canceled = 0;
+    let conversions = 0;
 
     commissions.forEach(c => {
       if (c.status === 'pendente' || c.status === 'em_analise') pending += c.commissionAmount;
       else if (c.status === 'disponivel' || c.status === 'aprovada') available += c.commissionAmount;
       else if (c.status === 'paga') paid += c.commissionAmount;
       else if (c.status === 'cancelada') canceled += c.commissionAmount;
+      if (c.status !== 'cancelada') conversions++;
     });
 
-    return { pending, available, paid, canceled, total: pending + available + paid };
+    return { pending, available, paid, canceled, total: pending + available + paid, conversions };
   }, [commissions]);
 
   // Filtered rows
@@ -74,7 +90,10 @@ export const ReportsPage: React.FC = () => {
     return commissions.filter(c => {
       const matchCamp = campaignFilter === 'all' || (c.campaign || 'padrao') === campaignFilter;
       const matchStatus = statusFilter === 'all' || c.status === statusFilter;
-      const matchSearch = !searchTerm || c.id.toLowerCase().includes(searchTerm.toLowerCase()) || (c.campaign || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = !searchTerm ||
+        c.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.campaign || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.buyerFirstName || '').toLowerCase().includes(searchTerm.toLowerCase());
       return matchCamp && matchStatus && matchSearch;
     });
   }, [commissions, campaignFilter, statusFilter, searchTerm]);
@@ -89,6 +108,7 @@ export const ReportsPage: React.FC = () => {
     const headers = [
       'ID Transação',
       'Data e Hora',
+      'Cliente',
       'Campanha',
       'Valor da Compra (R$)',
       'Taxa (%)',
@@ -99,6 +119,7 @@ export const ReportsPage: React.FC = () => {
     const rows = filteredCommissions.map(c => [
       c.id,
       formatDateTime(c.createdAt),
+      c.buyerFirstName || 'Cliente',
       c.campaign || 'padrao',
       c.orderAmount.toFixed(2),
       `${(c.commissionRate * 100).toFixed(0)}%`,
@@ -124,13 +145,24 @@ export const ReportsPage: React.FC = () => {
           </p>
         </div>
 
-        <Button
-          variant="secondary"
-          onClick={handleExportCSV}
-          leftIcon={<Download className="w-4 h-4" />}
-        >
-          Exportar em Planilha (CSV)
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            leftIcon={<RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />}
+          >
+            {isRefreshing ? 'Atualizando...' : 'Atualizar'}
+          </Button>
+
+          <Button
+            variant="secondary"
+            onClick={handleExportCSV}
+            leftIcon={<Download className="w-4 h-4" />}
+          >
+            Exportar em Planilha (CSV)
+          </Button>
+        </div>
       </div>
 
       {/* Summary KPI Strip */}
@@ -210,11 +242,11 @@ export const ReportsPage: React.FC = () => {
 
           <div>
             <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
-              Buscar por Código:
+              Buscar:
             </label>
             <input
               type="text"
-              placeholder="Digite o ID da comissão..."
+              placeholder="Buscar por ID, campanha ou nome do cliente..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
@@ -241,6 +273,7 @@ export const ReportsPage: React.FC = () => {
               <thead className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
                 <tr>
                   <th className="pb-3 font-semibold">ID / Data</th>
+                  <th className="pb-3 font-semibold">Cliente</th>
                   <th className="pb-3 font-semibold">Campanha</th>
                   <th className="pb-3 font-semibold">Valor Compra</th>
                   <th className="pb-3 font-semibold">Taxa</th>
@@ -254,6 +287,14 @@ export const ReportsPage: React.FC = () => {
                     <td className="py-3">
                       <span className="font-mono text-[11px] text-slate-400 block">{c.id}</span>
                       <span className="text-[11px] text-white">{formatDateTime(c.createdAt)}</span>
+                    </td>
+                    <td className="py-3">
+                      <span className="font-semibold text-white flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 flex items-center justify-center text-[10px] font-bold">
+                          {(c.buyerFirstName || 'C')[0].toUpperCase()}
+                        </span>
+                        {c.buyerFirstName || 'Cliente'}
+                      </span>
                     </td>
                     <td className="py-3">
                       <span className="px-2 py-0.5 rounded bg-slate-800 text-cyan-400 font-mono text-[11px]">

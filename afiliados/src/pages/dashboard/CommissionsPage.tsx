@@ -18,13 +18,15 @@ import {
   Clock,
   Check,
   History,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react';
 
 export const CommissionsPage: React.FC = () => {
   const { currentAffiliate, refreshAffiliate } = useAuth();
   const affiliate = currentAffiliate || MockDatabase.getAffiliates()[0];
   const settings = MockDatabase.getSettings();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [commissions, setCommissions] = useState(() =>
     MockDatabase.getCommissions().filter(c => c.affiliateId === affiliate.id || (affiliate.exclusiveCode && c.affiliateCode === affiliate.exclusiveCode))
@@ -34,48 +36,68 @@ export const CommissionsPage: React.FC = () => {
     MockDatabase.getPayments().filter(p => p.affiliateId === affiliate.id)
   );
 
-  useEffect(() => {
-    if (affiliate?.exclusiveCode || affiliate?.id) {
-      fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode}&affiliateId=${affiliate.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.success && data.commissions) {
-            setCommissions(data.commissions);
-            const allComms = MockDatabase.getCommissions().filter(c =>
-              c.affiliateId !== affiliate.id && c.affiliateCode !== affiliate.exclusiveCode
-            );
-            MockDatabase.saveCommissions([...data.commissions, ...allComms]);
-          }
-        })
-        .catch(console.warn);
+  const fetchCommissionsData = async () => {
+    if (!affiliate?.exclusiveCode && !affiliate?.id) return;
+    try {
+      const res = await fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode || ''}&affiliateId=${affiliate.id || ''}`);
+      const data = await res.json();
+      if (data.success && data.commissions) {
+        setCommissions(data.commissions);
+        const allComms = MockDatabase.getCommissions().filter(c =>
+          c.affiliateId !== affiliate.id && c.affiliateCode !== affiliate.exclusiveCode
+        );
+        MockDatabase.saveCommissions([...data.commissions, ...allComms]);
+      }
+    } catch (e) {
+      console.warn('Erro ao atualizar comissões:', e);
     }
+  };
+
+  useEffect(() => {
+    fetchCommissionsData();
+    const interval = setInterval(fetchCommissionsData, 8000);
+    return () => clearInterval(interval);
   }, [affiliate?.id, affiliate?.exclusiveCode]);
+
+  // Dynamic balances from commissions array
+  const dynamicPending = commissions
+    .filter(c => c.status === 'pendente')
+    .reduce((sum, c) => sum + Number(c.commissionAmount || 0), 0);
+  const dynamicAvailable = commissions
+    .filter(c => c.status === 'disponivel')
+    .reduce((sum, c) => sum + Number(c.commissionAmount || 0), 0);
+  const dynamicPaid = commissions
+    .filter(c => c.status === 'pago')
+    .reduce((sum, c) => sum + Number(c.commissionAmount || 0), 0);
+
+  const effectiveBalanceAvailable = (affiliate?.balanceAvailable && affiliate.balanceAvailable > 0)
+    ? affiliate.balanceAvailable
+    : dynamicAvailable;
+  const effectiveBalancePending = (affiliate?.balancePending && affiliate.balancePending > 0)
+    ? affiliate.balancePending
+    : dynamicPending;
+  const effectiveBalancePaid = (affiliate?.balancePaid && affiliate.balancePaid > 0)
+    ? affiliate.balancePaid
+    : dynamicPaid;
 
   // Payout Request Modal
   const [showPayoutModal, setShowPayoutModal] = useState(false);
-  const [payoutAmount, setPayoutAmount] = useState(affiliate.balanceAvailable.toString());
+  const [payoutAmount, setPayoutAmount] = useState(effectiveBalanceAvailable.toString());
   const [confirmPassword, setConfirmPassword] = useState('');
   const [payoutError, setPayoutError] = useState<string | null>(null);
   const [payoutSuccess, setPayoutSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const reloadData = () => {
+  const reloadData = async () => {
+    setIsRefreshing(true);
     refreshAffiliate();
-    if (affiliate?.exclusiveCode || affiliate?.id) {
-      fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode}&affiliateId=${affiliate.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.success && data.commissions) {
-            setCommissions(data.commissions);
-          }
-        })
-        .catch(console.warn);
-    }
+    await fetchCommissionsData();
     setPayments(MockDatabase.getPayments().filter(p => p.affiliateId === affiliate.id));
+    setTimeout(() => setIsRefreshing(false), 600);
   };
 
   const handleOpenPayout = () => {
-    setPayoutAmount(affiliate.balanceAvailable.toString());
+    setPayoutAmount(effectiveBalanceAvailable.toString());
     setConfirmPassword('');
     setPayoutError(null);
     setPayoutSuccess(null);
@@ -97,7 +119,7 @@ export const CommissionsPage: React.FC = () => {
       return;
     }
 
-    if (val > affiliate.balanceAvailable) {
+    if (val > effectiveBalanceAvailable) {
       setPayoutError('O valor informado ultrapassa seu saldo disponível.');
       return;
     }
@@ -124,7 +146,7 @@ export const CommissionsPage: React.FC = () => {
 
   // Eligibility Checklist
   const isApproved = affiliate.status === 'aprovado';
-  const hasMinBalance = affiliate.balanceAvailable >= settings.minimumPayoutAmount;
+  const hasMinBalance = effectiveBalanceAvailable >= settings.minimumPayoutAmount;
   const hasPix = Boolean(affiliate.pixKey && affiliate.pixKeyType);
   const isEligible = isApproved && hasMinBalance && hasPix;
 
@@ -143,15 +165,27 @@ export const CommissionsPage: React.FC = () => {
           </p>
         </div>
 
-        <Button
-          onClick={handleOpenPayout}
-          disabled={!isEligible}
-          variant="amber"
-          size="lg"
-          leftIcon={<Wallet className="w-4 h-4" />}
-        >
-          Solicitar Pagamento Pix
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={reloadData}
+            disabled={isRefreshing}
+            variant="secondary"
+            size="md"
+            leftIcon={<RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />}
+          >
+            {isRefreshing ? 'Atualizando...' : 'Atualizar'}
+          </Button>
+
+          <Button
+            onClick={handleOpenPayout}
+            disabled={!isEligible}
+            variant="amber"
+            size="lg"
+            leftIcon={<Wallet className="w-4 h-4" />}
+          >
+            Solicitar Pagamento Pix
+          </Button>
+        </div>
       </div>
 
       {/* Financial Overview Cards */}
@@ -161,7 +195,7 @@ export const CommissionsPage: React.FC = () => {
             Saldo Disponível para Saque
           </span>
           <span className="text-3xl font-black font-mono text-white">
-            {formatBRL(affiliate.balanceAvailable)}
+            {formatBRL(effectiveBalanceAvailable)}
           </span>
           <p className="text-xs text-slate-400 mt-2">
             Mínimo para saque: <strong className="text-emerald-400 font-mono">{formatBRL(settings.minimumPayoutAmount)}</strong>
@@ -173,7 +207,7 @@ export const CommissionsPage: React.FC = () => {
             Saldo Pendente em Análise
           </span>
           <span className="text-3xl font-black font-mono text-amber-300">
-            {formatBRL(affiliate.balancePending)}
+            {formatBRL(effectiveBalancePending)}
           </span>
           <p className="text-xs text-slate-400 mt-2">
             Comissões aguardando o sorteio das 19h
@@ -185,10 +219,10 @@ export const CommissionsPage: React.FC = () => {
             Total Já Pago no Pix
           </span>
           <span className="text-3xl font-black font-mono text-green-400">
-            {formatBRL(affiliate.balancePaid)}
+            {formatBRL(effectiveBalancePaid)}
           </span>
           <p className="text-xs text-slate-400 mt-2">
-            Chave cadastrada: <span className="font-mono text-slate-300 font-bold">{affiliate.pixKey}</span>
+            Chave cadastrada: <span className="font-mono text-slate-300 font-bold">{affiliate.pixKey || 'Não cadastrada'}</span>
           </p>
         </Card>
       </div>
@@ -277,6 +311,7 @@ export const CommissionsPage: React.FC = () => {
               <thead className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
                 <tr>
                   <th className="pb-3 font-semibold">ID / Data</th>
+                  <th className="pb-3 font-semibold">Cliente</th>
                   <th className="pb-3 font-semibold">Campanha</th>
                   <th className="pb-3 font-semibold">Valor Compra</th>
                   <th className="pb-3 font-semibold">Comissão</th>
@@ -289,6 +324,14 @@ export const CommissionsPage: React.FC = () => {
                     <td className="py-3">
                       <span className="font-mono text-[11px] text-slate-400 block">{c.id}</span>
                       <span className="text-white">{formatDateTime(c.createdAt)}</span>
+                    </td>
+                    <td className="py-3">
+                      <span className="font-semibold text-white flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 flex items-center justify-center text-[10px] font-bold">
+                          {(c.buyerFirstName || 'C')[0].toUpperCase()}
+                        </span>
+                        {c.buyerFirstName || 'Cliente'}
+                      </span>
                     </td>
                     <td className="py-3">
                       <span className="px-2 py-0.5 rounded bg-slate-800 text-cyan-400 font-mono text-[11px]">

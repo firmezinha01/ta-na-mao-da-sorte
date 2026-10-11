@@ -21,7 +21,8 @@ import {
   Sparkles,
   Zap,
   ArrowUpRight,
-  ExternalLink
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import {
   AreaChart,
@@ -39,42 +40,82 @@ export const DashboardHome: React.FC = () => {
   const { currentAffiliate, refreshAffiliate } = useAuth();
   const [periodFilter, setPeriodFilter] = useState<'7d' | '30d' | 'month' | 'today'>('7d');
   const [copied, setCopied] = useState(false);
-  const [testSimMessage, setTestSimMessage] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const affiliate = currentAffiliate || MockDatabase.getAffiliates()[0];
   const [commissions, setCommissions] = useState(() =>
     MockDatabase.getCommissions().filter(c => c.affiliateId === affiliate.id || (affiliate.exclusiveCode && c.affiliateCode === affiliate.exclusiveCode))
   );
 
-  useEffect(() => {
-    if (affiliate?.exclusiveCode || affiliate?.id) {
-      fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode}&affiliateId=${affiliate.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.success) {
-            if (data.commissions) {
-               setCommissions(data.commissions);
-              const allComms = MockDatabase.getCommissions().filter(c =>
-                c.affiliateId !== affiliate.id && c.affiliateCode !== affiliate.exclusiveCode
-              );
-              MockDatabase.saveCommissions([...data.commissions, ...allComms]);
-            }
-            if (data.affiliate) {
-              const allAffs = MockDatabase.getAffiliates();
-              const idx = allAffs.findIndex(a => a.id === data.affiliate.id || a.exclusiveCode === data.affiliate.exclusiveCode);
-              if (idx !== -1) {
-                allAffs[idx] = { ...allAffs[idx], ...data.affiliate };
-              } else {
-                allAffs.unshift(data.affiliate);
-              }
-              MockDatabase.saveAffiliates(allAffs);
-              refreshAffiliate();
-            }
+  const fetchCommissionsData = React.useCallback(async () => {
+    if (!affiliate?.exclusiveCode && !affiliate?.id) return;
+    try {
+      const res = await fetch(`/api/afiliados/commissions?affiliateCode=${affiliate.exclusiveCode}&affiliateId=${affiliate.id}`);
+      const data = await res.json();
+      if (data.success) {
+        if (data.commissions) {
+          setCommissions(data.commissions);
+          const allComms = MockDatabase.getCommissions().filter(c =>
+            c.affiliateId !== affiliate.id && c.affiliateCode !== affiliate.exclusiveCode
+          );
+          MockDatabase.saveCommissions([...data.commissions, ...allComms]);
+        }
+        if (data.affiliate) {
+          const allAffs = MockDatabase.getAffiliates();
+          const idx = allAffs.findIndex(a => a.id === data.affiliate.id || a.exclusiveCode === data.affiliate.exclusiveCode);
+          if (idx !== -1) {
+            allAffs[idx] = { ...allAffs[idx], ...data.affiliate };
+          } else {
+            allAffs.unshift(data.affiliate);
           }
-        })
-        .catch(err => console.warn('Erro ao carregar comissões:', err));
+          MockDatabase.saveAffiliates(allAffs);
+          refreshAffiliate();
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar comissões:', err);
     }
-  }, [affiliate?.id, affiliate?.exclusiveCode]);
+  }, [affiliate?.id, affiliate?.exclusiveCode, refreshAffiliate]);
+
+  useEffect(() => {
+    fetchCommissionsData();
+    const interval = setInterval(() => {
+      fetchCommissionsData();
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [fetchCommissionsData]);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchCommissionsData();
+    setTimeout(() => setIsRefreshing(false), 600);
+  };
+
+  const effectiveBalancePending = useMemo(() => {
+    const fromComms = commissions
+      .filter(c => c.status === 'pendente' || c.status === 'aprovada' || c.status === 'em_analise')
+      .reduce((sum, c) => sum + (c.commissionAmount || 0), 0);
+    return Math.max(affiliate.balancePending || 0, Number(fromComms.toFixed(2)));
+  }, [commissions, affiliate.balancePending]);
+
+  const effectiveBalanceAvailable = useMemo(() => {
+    const fromComms = commissions
+      .filter(c => c.status === 'disponivel')
+      .reduce((sum, c) => sum + (c.commissionAmount || 0), 0);
+    return Math.max(affiliate.balanceAvailable || 0, Number(fromComms.toFixed(2)));
+  }, [commissions, affiliate.balanceAvailable]);
+
+  const effectiveBalancePaid = useMemo(() => {
+    const fromComms = commissions
+      .filter(c => c.status === 'pago')
+      .reduce((sum, c) => sum + (c.commissionAmount || 0), 0);
+    return Math.max(affiliate.balancePaid || 0, Number(fromComms.toFixed(2)));
+  }, [commissions, affiliate.balancePaid]);
+
+  const effectiveConversions = useMemo(() => {
+    const fromComms = commissions.filter(c => c.status !== 'cancelada' && c.status !== 'cancelado').length;
+    return Math.max(affiliate.totalConversions || 0, fromComms);
+  }, [commissions, affiliate.totalConversions]);
 
   const payments = MockDatabase.getPayments().filter(p => p.affiliateId === affiliate.id);
   const links = MockDatabase.getLinks().filter(l => l.affiliateId === affiliate.id);
@@ -133,27 +174,6 @@ export const DashboardHome: React.FC = () => {
     return data;
   }, [periodFilter, affiliate.commissionRate]);
 
-  // Quick purchase simulation for local testing
-  const handleSimulateSale = () => {
-    TrackingService.setTrackingCookie({
-      affiliateCode: affiliate.exclusiveCode,
-      campaign: 'teste_local',
-      trackedAt: new Date().toISOString()
-    });
-
-    const res = TrackingService.simulatePurchase({
-      ticketsCount: 5, // 5 x R$ 2 = R$ 10
-      ticketPrice: 2.00,
-      buyerName: 'Cliente Simulado Teste'
-    });
-
-    if (res.success) {
-      setTestSimMessage(`🍀 Venda simulada com sucesso! +R$ ${res.commission?.toFixed(2)} creditado em Saldo Pendente.`);
-      refreshAffiliate();
-      setTimeout(() => setTestSimMessage(null), 5000);
-    }
-  };
-
   return (
     <div className="space-y-6">
       
@@ -201,31 +221,6 @@ export const DashboardHome: React.FC = () => {
         </div>
       </div>
 
-      {/* Simulator Banner for easy testing */}
-      <div className="p-3.5 bg-gradient-to-r from-emerald-950/70 via-slate-900 to-amber-950/40 rounded-2xl border border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2.5">
-          <Zap className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>
-            <strong>Ambiente de Teste Local:</strong> Clique no botão ao lado para simular uma compra de 5 bilhetes (R$ 10,00) pelo seu link e ver a comissão entrar no seu saldo!
-          </span>
-        </div>
-        <Button
-          size="sm"
-          variant="amber"
-          onClick={handleSimulateSale}
-          className="shrink-0 whitespace-nowrap"
-        >
-          Simular Venda (+R$ {(10.0 * affiliate.commissionRate).toFixed(2)})
-        </Button>
-      </div>
-
-      {testSimMessage && (
-        <div className="p-3 bg-emerald-950/80 border border-emerald-500 rounded-xl text-xs text-emerald-300 font-bold flex items-center gap-2 animate-in fade-in">
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>{testSimMessage}</span>
-        </div>
-      )}
-
       {/* KPI METRIC CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
@@ -240,7 +235,7 @@ export const DashboardHome: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-black font-mono text-white mb-2">
-            {formatBRL(affiliate.balanceAvailable)}
+            {formatBRL(effectiveBalanceAvailable)}
           </div>
           <div className="flex items-center justify-between pt-2 border-t border-emerald-950">
             <span className="text-[11px] text-slate-400">Pronto para saque</span>
@@ -263,7 +258,7 @@ export const DashboardHome: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-black font-mono text-amber-300 mb-2">
-            {formatBRL(affiliate.balancePending)}
+            {formatBRL(effectiveBalancePending)}
           </div>
           <div className="pt-2 border-t border-amber-950/80 text-[11px] text-slate-400">
             Liberação pós-sorteio diário
@@ -281,10 +276,10 @@ export const DashboardHome: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-black font-mono text-white mb-2">
-            {formatBRL(affiliate.balancePaid + affiliate.balanceAvailable + affiliate.balancePending)}
+            {formatBRL(effectiveBalancePaid + effectiveBalanceAvailable + effectiveBalancePending)}
           </div>
           <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
-            Já pago no Pix: <strong className="text-green-400 font-mono">{formatBRL(affiliate.balancePaid)}</strong>
+            Já pago no Pix: <strong className="text-green-400 font-mono">{formatBRL(effectiveBalancePaid)}</strong>
           </div>
         </Card>
 
@@ -303,7 +298,7 @@ export const DashboardHome: React.FC = () => {
           </div>
           <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400 flex justify-between">
             <span>Cliques: <strong className="text-white font-mono">{affiliate.totalClicks}</strong></span>
-            <span>Vendas: <strong className="text-emerald-400 font-mono">{affiliate.totalConversions}</strong></span>
+            <span>Vendas: <strong className="text-emerald-400 font-mono">{effectiveConversions}</strong></span>
           </div>
         </Card>
       </div>
@@ -405,12 +400,22 @@ export const DashboardHome: React.FC = () => {
             <Sparkles className="w-4 h-4 text-amber-400" />
             Comissões Recentes
           </h3>
-          <Link
-            to="/afiliados/comissoes"
-            className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
-          >
-            Ver Extrato Completo <ArrowUpRight className="w-3.5 h-3.5" />
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleManualRefresh}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all text-xs flex items-center gap-1.5 cursor-pointer border border-slate-700"
+              title="Atualizar Vendas"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline text-[11px] font-semibold text-slate-300">Atualizar</span>
+            </button>
+            <Link
+              to="/afiliados/comissoes"
+              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+            >
+              Ver Extrato Completo <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
         </div>
 
         {commissions.length === 0 ? (
@@ -423,6 +428,7 @@ export const DashboardHome: React.FC = () => {
               <thead className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
                 <tr>
                   <th className="pb-3 font-semibold">Data / Hora</th>
+                  <th className="pb-3 font-semibold">Cliente</th>
                   <th className="pb-3 font-semibold">Campanha</th>
                   <th className="pb-3 font-semibold">Valor da Compra</th>
                   <th className="pb-3 font-semibold">Sua Comissão</th>
@@ -430,23 +436,34 @@ export const DashboardHome: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-sans">
-                {commissions.slice(0, 5).map(c => (
-                  <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="py-3 text-slate-300">{formatDateTime(c.createdAt)}</td>
-                    <td className="py-3">
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-cyan-400 font-mono text-[11px]">
-                        {c.campaign || 'padrao'}
-                      </span>
-                    </td>
-                    <td className="py-3 text-slate-300 font-mono">{formatBRL(c.orderAmount)}</td>
-                    <td className="py-3 font-mono font-black text-emerald-400">
-                      +{formatBRL(c.commissionAmount)}
-                    </td>
-                    <td className="py-3 text-right">
-                      <Badge status={c.status} />
-                    </td>
-                  </tr>
-                ))}
+                {commissions.slice(0, 8).map(c => {
+                  const firstName = (c.buyerFirstName || c.buyerName || '').trim().split(' ')[0] || 'Cliente';
+                  return (
+                    <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="py-3 text-slate-300">{formatDateTime(c.createdAt)}</td>
+                      <td className="py-3 font-bold text-white">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-black flex items-center justify-center border border-emerald-500/30">
+                            {firstName.charAt(0).toUpperCase()}
+                          </span>
+                          <span>{firstName}</span>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <span className="px-2 py-0.5 rounded bg-slate-800 text-cyan-400 font-mono text-[11px]">
+                          {c.campaign || 'padrao'}
+                        </span>
+                      </td>
+                      <td className="py-3 text-slate-300 font-mono">{formatBRL(c.orderAmount)}</td>
+                      <td className="py-3 font-mono font-black text-emerald-400">
+                        +{formatBRL(c.commissionAmount)}
+                      </td>
+                      <td className="py-3 text-right">
+                        <Badge status={c.status} />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

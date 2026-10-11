@@ -18,7 +18,6 @@ import {
   ExternalLink,
   MessageCircle,
   Send,
-  Facebook,
   Mail
 } from 'lucide-react';
 

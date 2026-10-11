@@ -4,7 +4,7 @@ export type AffiliateStatus = 'pendente' | 'aprovado' | 'recusado' | 'suspenso';
 
 export type PixKeyType = 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'RANDOM';
 
-export type CommissionStatus = 'pendente' | 'em_analise' | 'aprovada' | 'disponivel' | 'paga' | 'cancelada';
+export type CommissionStatus = 'pendente' | 'em_analise' | 'aprovada' | 'disponivel' | 'paga' | 'pago' | 'cancelada' | 'cancelado';
 
 export type PaymentStatus = 'solicitado' | 'em_processamento' | 'pago' | 'recusado';
 
@@ -113,6 +113,7 @@ export interface Commission {
   availableAt?: string;
   paidAt?: string;
   buyerName?: string;
+  buyerFirstName?: string;
   buyerCpf?: string;
   ticketsCount?: number;
   tickets?: string[];

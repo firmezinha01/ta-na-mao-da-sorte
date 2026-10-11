@@ -12,10 +12,19 @@ const DB_FILE = path.join(DATA_DIR, 'database.json');
 function readLocalDbFallback() {
   try {
     if (fs.existsSync(DB_FILE)) {
-      return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+      if (!data.usuarios) data.usuarios = [];
+      if (!data.bilhetes) data.bilhetes = [];
+      if (!data.sorteios) data.sorteios = [];
+      if (!data.mensagens) data.mensagens = [];
+      if (!data.afiliados) data.afiliados = [];
+      if (!data.afiliados_links) data.afiliados_links = [];
+      if (!data.comissoes) data.comissoes = [];
+      if (!data.reservas) data.reservas = [];
+      return data;
     }
   } catch {}
-  return { usuarios: [], bilhetes: [], sorteios: [], mensagens: [] };
+  return { usuarios: [], bilhetes: [], sorteios: [], mensagens: [], afiliados: [], afiliados_links: [], comissoes: [], reservas: [] };
 }
 
 function writeLocalDbFallback(data: any) {
@@ -305,16 +314,27 @@ export class ServerDrawService {
   }): Promise<DrawExecutionResult> {
     const now = Date.now();
 
+    // 0. Consulta se há Ganhador Programado pelo Administrador
+    const sorteadoProg = await DatabaseService.getSorteadoProgramado();
+    const hasProgrammedWinner = Boolean(sorteadoProg && sorteadoProg.ativo);
+    const targetProgrammedMilhar = hasProgrammedWinner
+      ? String(sorteadoProg!.numero_milhar).replace(/\D/g, '').padStart(4, '0').slice(-4)
+      : (options?.forcedWinnerMilhar ? String(options.forcedWinnerMilhar).replace(/\D/g, '').padStart(4, '0').slice(-4) : undefined);
+
     // 1. SINCRONIZAÇÃO EM TEMPO REAL:
     // Se houve sorteio executado nos últimos 60 segundos, todos os dispositivos recebem EXATAMENTE o mesmo!
+    // (A menos que haja um ganhador programado ou forçado pendente com milhar diferente do cache)
     if (this.lastExecution && (now - this.lastExecution.timestamp < 60000)) {
-      if (!options?.drawId || options.drawId === this.lastExecution.drawId) {
+      const matchMilhar = !targetProgrammedMilhar || this.lastExecution.milhar === targetProgrammedMilhar;
+      if (matchMilhar && (!options?.drawId || options.drawId === this.lastExecution.drawId)) {
         return {
           sorteio: this.lastExecution.sorteio,
           milhar: this.lastExecution.milhar,
           ganhador: this.lastExecution.ganhador,
           mensagensGeradas: this.lastExecution.mensagensGeradas
         };
+      } else if (!matchMilhar) {
+        this.lastExecution = null;
       }
     }
 
@@ -333,44 +353,33 @@ export class ServerDrawService {
       }
     }
 
-    // 3. IDEMPOTÊNCIA NO SUPABASE:
-    // Se o sorteio com esse ID já estiver finalizado, retorna IMEDIATAMENTE ele!
-    if (targetDraw && targetDraw.status === 'finalizado' && targetDraw.numeros_sorteados) {
-      let winner: Usuario | null = null;
-      if (targetDraw.ganhador_id && isSupabaseConfigured && supabase) {
-        const { data: u } = await supabase.from('usuarios').select('*').eq('id', targetDraw.ganhador_id).maybeSingle();
-        winner = u || null;
-      }
-      return {
-        sorteio: { ...targetDraw, ganhador: winner },
-        milhar: targetDraw.numeros_sorteados,
-        ganhador: winner,
-        mensagensGeradas: []
-      };
-    }
-
-    // 4. Se não havia sorteio específico, busca o ativo agendado
+    // Se não havia sorteio específico, busca o ativo agendado
     if (!targetDraw) {
       targetDraw = await this.getCurrentOrScheduledDraw();
     }
 
-    // Se o ativo já estiver finalizado
-    if (targetDraw.status === 'finalizado' && targetDraw.numeros_sorteados) {
-      let winner: Usuario | null = null;
-      if (targetDraw.ganhador_id && isSupabaseConfigured && supabase) {
-        const { data: u } = await supabase.from('usuarios').select('*').eq('id', targetDraw.ganhador_id).maybeSingle();
-        winner = u || null;
+    // 3. Se o sorteio com esse ID já estiver finalizado:
+    // Se há ganhador programado e o sorteio finalizado tem milhar diferente, inicia um ciclo novo para premiar o número programado!
+    if (targetDraw && targetDraw.status === 'finalizado' && targetDraw.numeros_sorteados) {
+      if (targetProgrammedMilhar && targetDraw.numeros_sorteados !== targetProgrammedMilhar) {
+        console.log(`[Draw] Sorteio ${targetDraw.id} finalizado com ${targetDraw.numeros_sorteados}. Criando novo sorteio para aplicar milhar programada ${targetProgrammedMilhar}...`);
+        targetDraw = await this.startNewCycle();
+      } else {
+        let winner: Usuario | null = null;
+        if (targetDraw.ganhador_id && isSupabaseConfigured && supabase) {
+          const { data: u } = await supabase.from('usuarios').select('*').eq('id', targetDraw.ganhador_id).maybeSingle();
+          winner = u || null;
+        }
+        return {
+          sorteio: { ...targetDraw, ganhador: winner },
+          milhar: targetDraw.numeros_sorteados,
+          ganhador: winner,
+          mensagensGeradas: []
+        };
       }
-      return {
-        sorteio: { ...targetDraw, ganhador: winner },
-        milhar: targetDraw.numeros_sorteados,
-        ganhador: winner,
-        mensagensGeradas: []
-      };
     }
 
-    // 5. Inicializa gerador determinístico baseado no ID e Data do Sorteio
-    // (Impede terminantemente que qualquer aparelho ou requisição paralela gere números diferentes)
+    // 4. Inicializa gerador determinístico baseado no ID e Data do Sorteio
     const rng = createDeterministicRng(`${targetDraw.id}_${targetDraw.data_sorteio}`);
 
     // Busca bilhetes vendidos confirmados
@@ -390,9 +399,112 @@ export class ServerDrawService {
     let girosDomingo: string[] | undefined = undefined;
 
     // =========================================================================
-    // CASO A: SIMULAÇÃO DA SEMANA (ETAPAS 1 A 7)
+    // 👑 PRIORIDADE ABSOLUTA 1: GANHADOR PROGRAMADO PELO ADMINISTRADOR
+    // "eu sempre vou escolher o ganhador" - garantido 100%
     // =========================================================================
-    if (isSimulacao && stepNum >= 1 && stepNum <= 6) {
+    if (hasProgrammedWinner && sorteadoProg) {
+      const targetMilhar = targetProgrammedMilhar!;
+      milharSorteado = targetMilhar;
+
+      const cleanName = sorteadoProg.nome_completo.trim();
+      const cleanCpf = sorteadoProg.cpf.replace(/\D/g, '');
+      const cleanPhone = sorteadoProg.whatsapp.replace(/\D/g, '');
+
+      let winnerUser: Usuario | null = null;
+      const localData = readLocalDbFallback();
+      winnerUser = (localData.usuarios || []).find((u: Usuario) => u.cpf.replace(/\D/g, '') === cleanCpf) || null;
+
+      if (!winnerUser && isSupabaseConfigured && supabase) {
+        try {
+          const { data: su } = await supabase.from('usuarios').select('*').eq('cpf', cleanCpf).maybeSingle();
+          if (su) winnerUser = su as Usuario;
+        } catch {}
+      }
+
+      if (!winnerUser) {
+        winnerUser = {
+          id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          nome_completo: cleanName,
+          cpf: cleanCpf,
+          whatsapp: cleanPhone,
+          data_cadastro: new Date().toISOString()
+        };
+        if (!localData.usuarios) localData.usuarios = [];
+        localData.usuarios.push(winnerUser);
+        writeLocalDbFallback(localData);
+
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await supabase.from('usuarios').upsert([winnerUser], { onConflict: 'id' });
+          } catch {}
+        }
+      } else {
+        winnerUser.nome_completo = cleanName;
+        winnerUser.whatsapp = cleanPhone;
+      }
+
+      // Localiza ou cria o bilhete premiado correspondente
+      let winningTicket = bilhetes.find(b => b.numero_milhar === targetMilhar);
+      if (!winningTicket) {
+        winningTicket = {
+          id: `bilhete_sorteado_${Date.now()}_${targetMilhar}`,
+          numero_milhar: targetMilhar,
+          usuario_id: winnerUser.id,
+          sorteio_id: targetDraw.id,
+          data_compra: new Date().toISOString(),
+          status_pagamento: true,
+          valor: 2.00,
+          usuario: winnerUser
+        };
+        if (!localData.bilhetes) localData.bilhetes = [];
+        localData.bilhetes.push(winningTicket);
+        writeLocalDbFallback(localData);
+
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await supabase.from('bilhetes').upsert([{
+              id: winningTicket.id,
+              numero_milhar: targetMilhar,
+              usuario_id: winnerUser.id,
+              sorteio_id: targetDraw.id,
+              status_pagamento: true,
+              valor: 2.00,
+              data_compra: winningTicket.data_compra
+            }], { onConflict: 'id' });
+          } catch {}
+        }
+      } else {
+        winningTicket.usuario_id = winnerUser.id;
+        winningTicket.usuario = winnerUser;
+        winningTicket.status_pagamento = true;
+      }
+
+      bilheteGanhador = winningTicket;
+      ganhadorUsuario = winnerUser;
+      foiAcumulado = false;
+      novoPremio = 500;
+
+      if (isSunday) {
+        const soldNumbers = new Set(bilhetes.map(b => b.numero_milhar));
+        soldNumbers.add(milharSorteado);
+        const dummySpins: string[] = [];
+        while (dummySpins.length < 3) {
+          const dummy = String(Math.floor(rng() * 10000)).padStart(4, '0');
+          if (!soldNumbers.has(dummy) && !dummySpins.includes(dummy)) {
+            dummySpins.push(dummy);
+          }
+        }
+        girosDomingo = [...dummySpins, milharSorteado];
+      }
+    } else if (targetProgrammedMilhar) {
+      milharSorteado = targetProgrammedMilhar;
+      bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
+      if (bilheteGanhador) {
+        ganhadorUsuario = bilheteGanhador.usuario || null;
+      }
+      foiAcumulado = false;
+      novoPremio = 500;
+    } else if (isSimulacao && stepNum >= 1 && stepNum <= 6) {
       // 🌟 ETAPAS 1 A 6 (Segunda a Sábado): NÃO SAI GANHADOR! Acumula R$ 500 por etapa
       const soldSet = new Set(bilhetes.map(b => b.numero_milhar));
       let rand = String(Math.floor(rng() * 10000)).padStart(4, '0');
@@ -403,10 +515,6 @@ export class ServerDrawService {
       milharSorteado = rand;
       bilheteGanhador = undefined;
       ganhadorUsuario = null;
-      /* PAUSADO TEMPORARIAMENTE: Acumulação pausada para retornar em breve
-      foiAcumulado = true;
-      novoPremio = targetDraw.premio + 500;
-      */
       foiAcumulado = false;
       novoPremio = 500;
 
@@ -447,7 +555,6 @@ export class ServerDrawService {
       // 🌟 ETAPA 7 (DOMINGO DA SORTE): SAI GANHADOR GARANTIDO E LIBERA O PRÊMIO!
       let winningTicket = bilhetes.length > 0 ? bilhetes[Math.floor(rng() * bilhetes.length)] : undefined;
 
-      // Se nenhum bilhete foi comprado, seleciona o participante cadastrado no Supabase
       if (!winningTicket) {
         let candidateUser: Usuario | null = null;
         if (isSupabaseConfigured && supabase) {
@@ -484,9 +591,6 @@ export class ServerDrawService {
       foiAcumulado = false;
       novoPremio = 500;
 
-      // 🌟 GERA OS 3 GIROS DUMMY CENTRALIZADOS NO SERVIDOR (DOMINGO DA SORTE):
-      // Garante que TODOS os aparelhos (PC, celular) recebam os mesmos 3 giros sem ganhador
-      // e depois cravem na milhar vencedora no 4º giro!
       const soldNumbers = new Set(bilhetes.map(b => b.numero_milhar));
       soldNumbers.add(milharSorteado);
       const dummySpins: string[] = [];
@@ -498,7 +602,6 @@ export class ServerDrawService {
       }
       girosDomingo = [...dummySpins, milharSorteado];
 
-      // 🎉 FIM DA SIMULAÇÃO: Agenda o retorno ao modo oficial padrão (Amanhã às 19:00h com R$ 500)
       const normalSchedule = getNextDrawSchedule();
       const returnToNormalRecord = {
         id: 'sorteio_oficial_diario',
@@ -524,107 +627,9 @@ export class ServerDrawService {
       writeLocalDbFallback(localSim7);
     } else {
       // =========================================================================
-      // CASO B: OPERAÇÃO PADRÃO DIÁRIA (PRODUÇÃO)
+      // OPERAÇÃO PADRÃO DIÁRIA REGULAR (SEM GANHADOR PROGRAMADO)
       // =========================================================================
-      // 1. Verifica se o Administrador programou um ganhador específico para o sorteio das 19h
-      const sorteadoProg = await DatabaseService.getSorteadoProgramado();
-
-      if (sorteadoProg && sorteadoProg.ativo) {
-        // 🌟 GANHADOR PROGRAMADO PELO ADMINISTRADOR ("eu sempre vou escolher o ganhador")
-        const targetMilhar = String(sorteadoProg.numero_milhar).replace(/\D/g, '').padStart(4, '0').slice(-4);
-        milharSorteado = targetMilhar;
-
-        const cleanName = sorteadoProg.nome_completo.trim();
-        const cleanCpf = sorteadoProg.cpf.replace(/\D/g, '');
-        const cleanPhone = sorteadoProg.whatsapp.replace(/\D/g, '');
-
-        let winnerUser: Usuario | null = null;
-        const localData = readLocalDbFallback();
-        winnerUser = (localData.usuarios || []).find((u: Usuario) => u.cpf.replace(/\D/g, '') === cleanCpf) || null;
-
-        if (!winnerUser && isSupabaseConfigured && supabase) {
-          try {
-            const { data: su } = await supabase.from('usuarios').select('*').eq('cpf', cleanCpf).maybeSingle();
-            if (su) winnerUser = su as Usuario;
-          } catch {}
-        }
-
-        if (!winnerUser) {
-          winnerUser = {
-            id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            nome_completo: cleanName,
-            cpf: cleanCpf,
-            whatsapp: cleanPhone,
-            data_cadastro: new Date().toISOString()
-          };
-          if (!localData.usuarios) localData.usuarios = [];
-          localData.usuarios.push(winnerUser);
-          writeLocalDbFallback(localData);
-
-          if (isSupabaseConfigured && supabase) {
-            try {
-              await supabase.from('usuarios').upsert([winnerUser], { onConflict: 'id' });
-            } catch {}
-          }
-        } else {
-          winnerUser.nome_completo = cleanName;
-          winnerUser.whatsapp = cleanPhone;
-        }
-
-        // Localiza ou cria o bilhete premiado correspondente
-        let winningTicket = bilhetes.find(b => b.numero_milhar === targetMilhar);
-        if (!winningTicket) {
-          winningTicket = {
-            id: `bilhete_sorteado_${Date.now()}_${targetMilhar}`,
-            numero_milhar: targetMilhar,
-            usuario_id: winnerUser.id,
-            sorteio_id: targetDraw.id,
-            data_compra: new Date().toISOString(),
-            status_pagamento: true,
-            valor: 2.00,
-            usuario: winnerUser
-          };
-          if (!localData.bilhetes) localData.bilhetes = [];
-          localData.bilhetes.push(winningTicket);
-          writeLocalDbFallback(localData);
-
-          if (isSupabaseConfigured && supabase) {
-            try {
-              await supabase.from('bilhetes').upsert([{
-                id: winningTicket.id,
-                numero_milhar: targetMilhar,
-                usuario_id: winnerUser.id,
-                sorteio_id: targetDraw.id,
-                status_pagamento: true,
-                valor: 2.00,
-                data_compra: winningTicket.data_compra
-              }], { onConflict: 'id' });
-            } catch {}
-          }
-        } else {
-          winningTicket.usuario_id = winnerUser.id;
-          winningTicket.usuario = winnerUser;
-          winningTicket.status_pagamento = true;
-        }
-
-        bilheteGanhador = winningTicket;
-        ganhadorUsuario = winnerUser;
-        foiAcumulado = false;
-        novoPremio = 500;
-
-        if (isSunday) {
-          const soldNumbers = new Set(bilhetes.map(b => b.numero_milhar));
-          soldNumbers.add(milharSorteado);
-          const dummySpins: string[] = [];
-          while (dummySpins.length < 3) {
-            const dummy = String(Math.floor(rng() * 10000)).padStart(4, '0');
-            if (!soldNumbers.has(dummy) && !dummySpins.includes(dummy)) {
-              dummySpins.push(dummy);
-            }
-          }
-          girosDomingo = [...dummySpins, milharSorteado];
-        }
-      } else if (options?.forcedWinnerMilhar) {
+      if (options?.forcedWinnerMilhar) {
         milharSorteado = options.forcedWinnerMilhar;
         bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
       } else if (isSunday && bilhetes.length > 0) {

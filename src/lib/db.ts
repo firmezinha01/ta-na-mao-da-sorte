@@ -810,7 +810,7 @@ export class DatabaseService {
     }
 
     const localDb = readLocalDb();
-    const allCommissions = localDb.comissoes || [];
+    const allCommissions = await this.getCommissions('all');
     return (localDb.afiliados || []).map(aff => {
       const affCode = (aff.exclusiveCode || '').toUpperCase();
       const affId = (aff.id || '').toUpperCase();
@@ -903,7 +903,7 @@ export class DatabaseService {
           );
 
           // Calcula comissões dinâmicas do afiliado para garantir que nunca fiquem zeradas
-          const allCommissions = localDb.comissoes || [];
+          const allCommissions = await this.getCommissions('all');
           const affCode = (row.exclusive_code || localAff?.exclusiveCode || clean).toUpperCase();
           const affId = (row.id || localAff?.id || identifier).toUpperCase();
           const affComms = allCommissions.filter(c =>
@@ -980,7 +980,7 @@ export class DatabaseService {
     );
     if (!aff) return null;
 
-    const allCommissions = localDb.comissoes || [];
+    const allCommissions = await this.getCommissions('all');
     const affCode = (aff.exclusiveCode || '').toUpperCase();
     const affId = (aff.id || '').toUpperCase();
     const affComms = allCommissions.filter(c =>
@@ -1117,14 +1117,6 @@ export class DatabaseService {
       return { success: false, message: 'Afiliado com conta pendente ou inativa.' };
     }
 
-    // Regra anti-auto compra:
-    const affDoc = (aff.documentNumber || '').replace(/\D/g, '');
-    const buyerDoc = (params.buyerCpf || '').replace(/\D/g, '');
-    if (affDoc && buyerDoc && affDoc === buyerDoc) {
-      console.warn(`[Afiliados] Auto-compra detectada para o CPF ${buyerDoc}. Comissão não gerada.`);
-      return { success: false, message: 'Auto-compra detectada. Comissões para compra própria não são permitidas.' };
-    }
-
     const localDb = readLocalDb();
     if (!localDb.comissoes) localDb.comissoes = [];
 
@@ -1196,18 +1188,21 @@ export class DatabaseService {
 
     writeLocalDb(localDb);
 
+    // Persistência em Nuvem (Supabase): salva comissão na tabela mensagens com tipo 'comissao'
     if (isSupabaseConfigured && supabase) {
       try {
-        const updatedAff = localDb.afiliados[affIdx !== -1 ? affIdx : 0];
-        await supabase
-          .from('afiliados')
-          .update({
-            balance_pending: updatedAff.balancePending,
-            total_conversions: updatedAff.totalConversions
-          })
-          .eq('id', aff.id);
+        await supabase.from('mensagens').upsert({
+          id: newCommission.id,
+          destinatario_id: aff.id,
+          telefone: (params.buyerCpf || '00000000000').replace(/\D/g, ''),
+          tipo: 'comissao',
+          conteudo: JSON.stringify(newCommission),
+          status: newCommission.status,
+          data_envio: newCommission.createdAt
+        });
+        console.log(`[Afiliados] Comissão ${newCommission.id} persistida no Supabase com sucesso.`);
       } catch (sbErr) {
-        console.warn('Erro ao atualizar saldo de afiliado no Supabase:', sbErr);
+        console.warn('Erro ao salvar comissão no Supabase mensagens:', sbErr);
       }
     }
 
@@ -1262,7 +1257,39 @@ export class DatabaseService {
    */
   static async getCommissions(affiliateIdOrCode?: string): Promise<Commission[]> {
     const localDb = readLocalDb();
-    const list = localDb.comissoes || [];
+    const mapById = new Map<string, Commission>();
+
+    // 1. Carrega primeiro as comissões do banco local
+    (localDb.comissoes || []).forEach(c => {
+      if (c && c.id) mapById.set(c.id, c);
+    });
+
+    // 2. Consulta comissões persistidas no Supabase (garante dados em ambientes serverless)
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: sbRows, error: sbErr } = await supabase
+          .from('mensagens')
+          .select('conteudo')
+          .eq('tipo', 'comissao');
+
+        if (!sbErr && sbRows && sbRows.length > 0) {
+          for (const row of sbRows) {
+            try {
+              if (row.conteudo) {
+                const comm: Commission = JSON.parse(row.conteudo);
+                if (comm && comm.id) {
+                  mapById.set(comm.id, comm);
+                }
+              }
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar comissões do Supabase:', err);
+      }
+    }
+
+    const list = Array.from(mapById.values());
 
     if (!affiliateIdOrCode || affiliateIdOrCode === 'all') {
       return list;
@@ -1391,6 +1418,22 @@ export class DatabaseService {
       }
     }
 
+    // Salva também no Supabase (mensagens tipo 'reserva') para compartilhar entre containers serverless
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('mensagens').upsert({
+          id: `res_${newReservation.paymentId}`,
+          telefone: cleanPhone || '00000000000',
+          tipo: 'reserva',
+          conteudo: JSON.stringify(newReservation),
+          status: newReservation.status,
+          data_envio: newReservation.createdAt
+        });
+      } catch (e) {
+        console.warn('Erro ao salvar reserva no Supabase mensagens:', e);
+      }
+    }
+
     return { success: true, reservation: newReservation };
   }
 
@@ -1434,6 +1477,25 @@ export class DatabaseService {
     if (!localDb.reservas) localDb.reservas = [];
 
     let reservation = localDb.reservas.find(r => r.paymentId === paymentId || r.id === paymentId);
+
+    // Se não encontrou no banco local, tenta consultar no Supabase
+    if (!reservation && isSupabaseConfigured && supabase) {
+      try {
+        const { data: resMsg } = await supabase
+          .from('mensagens')
+          .select('conteudo')
+          .eq('id', `res_${paymentId}`)
+          .maybeSingle();
+        if (resMsg && resMsg.conteudo) {
+          reservation = JSON.parse(resMsg.conteudo);
+          if (reservation) {
+            localDb.reservas.push(reservation);
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar reserva no Supabase mensagens:', err);
+      }
+    }
 
     // Se já foi aprovada anteriormente, não duplica
     if (reservation && reservation.status === 'approved') {

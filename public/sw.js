@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tanamao-pwa-v1';
+const CACHE_NAME = 'tanamao-pwa-v2';
 const PRECACHE_URLS = [
   '/',
   '/manifest.json',
@@ -33,9 +33,17 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
-  // Ignore API requests and chrome-extension
+  // Ignore API requests and non-http
   const url = new URL(event.request.url);
   if (url.pathname.startsWith('/api') || !url.protocol.startsWith('http')) {
+    return;
+  }
+
+  // Never cache /afiliados or HTML page navigation, always get fresh network response
+  if (url.pathname.startsWith('/afiliados') || event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match(event.request))
+    );
     return;
   }
 

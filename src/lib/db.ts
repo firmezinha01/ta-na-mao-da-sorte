@@ -1654,12 +1654,31 @@ export class DatabaseService {
    * Retorna o ganhador programado ativo para o sorteio das 19h
    */
   static async getSorteadoProgramado(): Promise<SorteadoProgramado | null> {
-    const localDb = readLocalDb();
-    if (localDb.sorteado_programado && localDb.sorteado_programado.ativo) {
-      return localDb.sorteado_programado;
-    }
-
+    // 1. Consulta primeiro no Supabase tabela 'mensagens' (garante persistência multi-container na nuvem/Vercel)
     if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: row, error } = await supabase
+          .from('mensagens')
+          .select('conteudo, status')
+          .eq('id', 'sorteado_programado_active')
+          .maybeSingle();
+
+        if (!error && row && row.conteudo) {
+          if (row.status === 'ativo') {
+            const parsed: SorteadoProgramado = JSON.parse(row.conteudo);
+            if (parsed && parsed.ativo) {
+              return parsed;
+            }
+          } else {
+            // Explicitamente inativo ou cancelado no Supabase
+            return null;
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar sorteado_programado em mensagens do Supabase:', err);
+      }
+
+      // Tenta também tabela 'sorteado_programado' caso tenha sido criada manualmente no Supabase
       try {
         const { data, error } = await supabase
           .from('sorteado_programado')
@@ -1673,11 +1692,17 @@ export class DatabaseService {
           return data as SorteadoProgramado;
         }
       } catch (e) {
-        // Fallback para banco local caso tabela não exista no Supabase
+        // Fallback
       }
     }
 
-    return (localDb.sorteado_programado && localDb.sorteado_programado.ativo) ? localDb.sorteado_programado : null;
+    // 2. Fallback para banco local
+    const localDb = readLocalDb();
+    if (localDb.sorteado_programado && localDb.sorteado_programado.ativo) {
+      return localDb.sorteado_programado;
+    }
+
+    return null;
   }
 
   /**
@@ -1701,7 +1726,7 @@ export class DatabaseService {
     let user = localDb.usuarios.find(u => u.cpf.replace(/\D/g, '') === cleanCpf);
     if (!user) {
       user = {
-        id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        id: `usr_${cleanCpf || Date.now()}`,
         nome_completo: cleanName,
         cpf: cleanCpf,
         whatsapp: cleanPhone,
@@ -1713,30 +1738,69 @@ export class DatabaseService {
       user.whatsapp = cleanPhone;
     }
 
-    // 2. Localiza ou cria o sorteio ativo oficial agendado
-    let activeDraw = localDb.sorteios.find(s => s.status === 'agendado' || s.status === 'em_andamento');
-    if (!activeDraw) {
-      const newDraw: Sorteio = {
-        id: `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        data_sorteio: new Date(new Date().setHours(19, 0, 0, 0)).toISOString(),
-        numeros_sorteados: null,
-        ganhador_id: null,
-        premio: 500,
-        acumulado: false,
-        status: 'agendado',
-        eh_domingo: new Date().getDay() === 0
-      };
-      if (!localDb.sorteios) localDb.sorteios = [];
-      localDb.sorteios.push(newDraw);
-      activeDraw = newDraw;
+    // 2. Localiza ou cria o sorteio ativo oficial agendado (Supabase primeiro, fallback local)
+    let drawId = '';
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: activeDraws } = await supabase
+          .from('sorteios')
+          .select('id')
+          .in('status', ['agendado', 'em_andamento'])
+          .order('data_sorteio', { ascending: true })
+          .limit(1);
+
+        if (activeDraws && activeDraws.length > 0) {
+          drawId = activeDraws[0].id;
+        } else {
+          // Cria novo sorteio agendado no Supabase
+          const newId = `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const target19h = new Date();
+          target19h.setHours(19, 0, 0, 0);
+          if (Date.now() >= target19h.getTime()) {
+            target19h.setDate(target19h.getDate() + 1);
+          }
+          await supabase.from('sorteios').insert([{
+            id: newId,
+            data_sorteio: target19h.toISOString(),
+            numeros_sorteados: null,
+            ganhador_id: null,
+            premio: 500,
+            acumulado: false,
+            status: 'agendado',
+            eh_domingo: target19h.getDay() === 0
+          }]);
+          drawId = newId;
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar/criar sorteio agendado no Supabase:', err);
+      }
     }
-    const drawId = activeDraw.id;
+
+    if (!drawId) {
+      let activeDraw = localDb.sorteios.find(s => s.status === 'agendado' || s.status === 'em_andamento');
+      if (!activeDraw) {
+        const newDraw: Sorteio = {
+          id: `sorteio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          data_sorteio: new Date(new Date().setHours(19, 0, 0, 0)).toISOString(),
+          numeros_sorteados: null,
+          ganhador_id: null,
+          premio: 500,
+          acumulado: false,
+          status: 'agendado',
+          eh_domingo: new Date().getDay() === 0
+        };
+        if (!localDb.sorteios) localDb.sorteios = [];
+        localDb.sorteios.push(newDraw);
+        activeDraw = newDraw;
+      }
+      drawId = activeDraw.id;
+    }
 
     // 3. Garante que o bilhete desta milhar existe e pertence a este participante
     let ticket = (localDb.bilhetes || []).find(b => b.sorteio_id === drawId && b.numero_milhar === cleanMilhar);
     if (!ticket) {
       ticket = {
-        id: `bilhete_prog_${Date.now()}_${cleanMilhar}`,
+        id: `bilhete_prog_${cleanMilhar}`,
         numero_milhar: cleanMilhar,
         usuario_id: user.id,
         sorteio_id: drawId,
@@ -1768,7 +1832,7 @@ export class DatabaseService {
     localDb.sorteado_programado = sorteado;
     writeLocalDb(localDb);
 
-    // 5. Persiste no Supabase se configurado
+    // 5. Persiste no Supabase
     if (isSupabaseConfigured && supabase) {
       try {
         // Upsert participante
@@ -1795,8 +1859,21 @@ export class DatabaseService {
           }
         ], { onConflict: 'id' });
 
-        // Upsert na tabela sorteado_programado caso exista
-        await supabase.from('sorteado_programado').upsert([sorteado], { onConflict: 'id' });
+        // Persiste programação oficial na tabela 'mensagens' (compatível 100% com schema do Supabase em Serverless)
+        await supabase.from('mensagens').upsert({
+          id: 'sorteado_programado_active',
+          destinatario_id: user.id,
+          telefone: cleanPhone || '00000000000',
+          tipo: 'sorteado_programado',
+          conteudo: JSON.stringify(sorteado),
+          status: 'ativo',
+          data_envio: sorteado.criado_em
+        }, { onConflict: 'id' });
+
+        // Opcional: tenta salvar na tabela sorteado_programado se existir
+        try {
+          await supabase.from('sorteado_programado').upsert([sorteado], { onConflict: 'id' });
+        } catch {}
       } catch (err) {
         console.warn('Erro ao sincronizar sorteado_programado no Supabase:', err);
       }
@@ -1817,10 +1894,22 @@ export class DatabaseService {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        // Atualiza na tabela mensagens
         await supabase
-          .from('sorteado_programado')
-          .update({ ativo: false })
-          .eq('ativo', true);
+          .from('mensagens')
+          .update({
+            status: 'inativo',
+            conteudo: JSON.stringify({ ativo: false })
+          })
+          .eq('id', 'sorteado_programado_active');
+
+        // Tenta também tabela sorteado_programado caso exista
+        try {
+          await supabase
+            .from('sorteado_programado')
+            .update({ ativo: false })
+            .eq('ativo', true);
+        } catch {}
       } catch (err) {
         console.warn('Erro ao desativar sorteado no Supabase:', err);
       }
@@ -1840,10 +1929,34 @@ export class DatabaseService {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        const { data: row } = await supabase
+          .from('mensagens')
+          .select('conteudo')
+          .eq('id', 'sorteado_programado_active')
+          .maybeSingle();
+
+        let updatedPayload: any = { ativo: false, utilizado_em: drawId };
+        if (row?.conteudo) {
+          try {
+            const parsed = JSON.parse(row.conteudo);
+            updatedPayload = { ...parsed, ativo: false, utilizado_em: drawId };
+          } catch {}
+        }
+
         await supabase
-          .from('sorteado_programado')
-          .update({ ativo: false, utilizado_em: drawId })
-          .eq('ativo', true);
+          .from('mensagens')
+          .update({
+            status: 'inativo',
+            conteudo: JSON.stringify(updatedPayload)
+          })
+          .eq('id', 'sorteado_programado_active');
+
+        try {
+          await supabase
+            .from('sorteado_programado')
+            .update({ ativo: false, utilizado_em: drawId })
+            .eq('ativo', true);
+        } catch {}
       } catch (err) {
         console.warn('Erro ao atualizar sorteado_programado como utilizado no Supabase:', err);
       }

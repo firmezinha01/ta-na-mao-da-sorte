@@ -441,13 +441,18 @@ export class ServerDrawService {
       } else {
         winnerUser.nome_completo = cleanName;
         winnerUser.whatsapp = cleanPhone;
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await supabase.from('usuarios').upsert([winnerUser], { onConflict: 'id' });
+          } catch {}
+        }
       }
 
       // Localiza ou cria o bilhete premiado correspondente
       let winningTicket = bilhetes.find(b => b.numero_milhar === targetMilhar);
       if (!winningTicket) {
         winningTicket = {
-          id: `bilhete_sorteado_${Date.now()}_${targetMilhar}`,
+          id: `bilhete_prog_${targetMilhar}`,
           numero_milhar: targetMilhar,
           usuario_id: winnerUser.id,
           sorteio_id: targetDraw.id,
@@ -477,6 +482,20 @@ export class ServerDrawService {
         winningTicket.usuario_id = winnerUser.id;
         winningTicket.usuario = winnerUser;
         winningTicket.status_pagamento = true;
+
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await supabase.from('bilhetes').upsert([{
+              id: winningTicket.id,
+              numero_milhar: targetMilhar,
+              usuario_id: winnerUser.id,
+              sorteio_id: targetDraw.id,
+              status_pagamento: true,
+              valor: 2.00,
+              data_compra: winningTicket.data_compra
+            }], { onConflict: 'id' });
+          } catch {}
+        }
       }
 
       bilheteGanhador = winningTicket;
@@ -628,51 +647,53 @@ export class ServerDrawService {
     } else {
       // =========================================================================
       // OPERAÇÃO PADRÃO DIÁRIA REGULAR (SEM GANHADOR PROGRAMADO)
+      // "o ganhador eu que irei definir por esse painel, quando não for preenchido não havera ganhador"
       // =========================================================================
       if (options?.forcedWinnerMilhar) {
         milharSorteado = options.forcedWinnerMilhar;
         bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
-      } else if (isSunday && bilhetes.length > 0) {
-        // 🌟 REGRA DO DOMINGO: A roleta gira exclusivamente entre os bilhetes comprados até sair vencedor garantido
-        const sorteado = bilhetes[Math.floor(rng() * bilhetes.length)];
-        milharSorteado = sorteado.numero_milhar;
-        bilheteGanhador = sorteado;
-
-        // Gera os 3 giros dummy centralizados para domingo
-        const soldNumbers = new Set(bilhetes.map(b => b.numero_milhar));
-        soldNumbers.add(milharSorteado);
-        const dummySpins: string[] = [];
-        while (dummySpins.length < 3) {
-          const dummy = String(Math.floor(rng() * 10000)).padStart(4, '0');
-          if (!soldNumbers.has(dummy) && !dummySpins.includes(dummy)) {
-            dummySpins.push(dummy);
+        if (bilheteGanhador) {
+          foiAcumulado = false;
+          novoPremio = 500;
+          if (bilheteGanhador.usuario) {
+            ganhadorUsuario = bilheteGanhador.usuario;
+          } else if (bilheteGanhador.usuario_id && isSupabaseConfigured && supabase) {
+            const { data: u } = await supabase.from('usuarios').select('*').eq('id', bilheteGanhador.usuario_id).maybeSingle();
+            ganhadorUsuario = u || null;
           }
+        } else {
+          foiAcumulado = true;
+          novoPremio = 500;
+          ganhadorUsuario = null;
         }
-        girosDomingo = [...dummySpins, milharSorteado];
-      } else if (bilhetes.length > 0) {
-        // 🌟 "Apartir de hoje todo dia vai ter um ganhador": Se houver bilhetes vendidos, sorteia entre os bilhetes
-        const sorteado = bilhetes[Math.floor(rng() * bilhetes.length)];
-        milharSorteado = sorteado.numero_milhar;
-        bilheteGanhador = sorteado;
       } else {
-        // Sorteio diário padrão: 0000 a 9999
-        const randInt = Math.floor(rng() * 10000);
-        milharSorteado = String(randInt).padStart(4, '0');
-        bilheteGanhador = bilhetes.find(b => b.numero_milhar === milharSorteado);
-      }
+        // 🌟 REGRA ABSOLUTA DO ADMINISTRADOR:
+        // "quando não for preenchido não havera ganhador"
+        // Sorteia uma milhar que NÃO foi comprada por nenhum participante, garantindo 100% que NÃO HAVERÁ GANHADOR!
+        const soldSet = new Set(bilhetes.map(b => b.numero_milhar));
+        let rand = String(Math.floor(rng() * 10000)).padStart(4, '0');
+        let attempts = 0;
+        while (soldSet.has(rand) && attempts < 10000) {
+          rand = String(Math.floor(rng() * 10000)).padStart(4, '0');
+          attempts++;
+        }
 
-      if (bilheteGanhador) {
-        foiAcumulado = false;
+        milharSorteado = rand;
+        bilheteGanhador = undefined;
+        ganhadorUsuario = null;
+        foiAcumulado = true;
         novoPremio = 500;
-        if (bilheteGanhador.usuario) {
-          ganhadorUsuario = bilheteGanhador.usuario;
-        } else if (bilheteGanhador.usuario_id && isSupabaseConfigured && supabase) {
-          const { data: u } = await supabase.from('usuarios').select('*').eq('id', bilheteGanhador.usuario_id).maybeSingle();
-          ganhadorUsuario = u || null;
+
+        if (isSunday) {
+          const dummySpins: string[] = [];
+          while (dummySpins.length < 3) {
+            const dummy = String(Math.floor(rng() * 10000)).padStart(4, '0');
+            if (dummy !== milharSorteado && !dummySpins.includes(dummy)) {
+              dummySpins.push(dummy);
+            }
+          }
+          girosDomingo = [...dummySpins, milharSorteado];
         }
-      } else {
-        foiAcumulado = false;
-        novoPremio = 500;
       }
 
       // 🌟 REGRA DO CLIENTE:
@@ -749,10 +770,12 @@ export class ServerDrawService {
     writeLocalDbFallback(local);
 
     // Marca o sorteado programado como utilizado se houver
-    try {
-      await DatabaseService.markSorteadoAsUsed(targetDraw.id);
-    } catch (e) {
-      console.warn('Erro ao marcar sorteado como utilizado:', e);
+    if (hasProgrammedWinner) {
+      try {
+        await DatabaseService.markSorteadoAsUsed(targetDraw.id);
+      } catch (e) {
+        console.warn('Erro ao marcar sorteado como utilizado:', e);
+      }
     }
 
     // 9. Mensagens de Notificação via WhatsApp para o Ganhador

@@ -194,22 +194,7 @@ export function getLastMonday10AM(referenceDate: Date = new Date()): Date {
  *
  * Retorna true se o sorteio deve ser exibido, ou false se já expirou pelo corte de Segunda-feira às 10:00h.
  */
-export function shouldShowLastDrawResult(drawDateIso: string, referenceDate: Date = new Date()): boolean {
-  try {
-    const drawTimestamp = new Date(drawDateIso).getTime();
-    if (isNaN(drawTimestamp)) return false;
-
-    // Se o sorteio foi realizado há menos de 10 minutos (ex: durante testes ou simulações recentes), sempre exibe
-    if (Date.now() - drawTimestamp < 10 * 60 * 1000) {
-      return true;
-    }
-
-    const lastMonday10AM = getLastMonday10AM(referenceDate);
-    // Se o sorteio foi realizado após ou na última segunda-feira às 10h, exibe na tela.
-    // Se foi realizado antes, foi apagado pelo corte semanal.
-    return drawTimestamp >= lastMonday10AM.getTime();
-  } catch {
-    return true;
-  }
+export function shouldShowLastDrawResult(_drawDateIso: string, _referenceDate: Date = new Date()): boolean {
+  return true;
 }
 

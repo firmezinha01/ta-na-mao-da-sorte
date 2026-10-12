@@ -867,12 +867,6 @@ export class ServerDrawService {
       return null;
     }
 
-    // Regra do cliente: Apagar toda segunda-feira às 10:00h da manhã
-    const isVisible = shouldShowLastDrawResult(lastDraw.data_sorteio);
-    if (!isVisible) {
-      return null;
-    }
-
     let primeiroNome = '';
     let telefoneFinal = '';
 

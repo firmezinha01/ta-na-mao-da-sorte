@@ -19,7 +19,7 @@ interface LastDrawResultCardProps {
 }
 
 export const LastDrawResultCard: React.FC<LastDrawResultCardProps> = ({ lastDraw }) => {
-  if (!lastDraw || !lastDraw.isVisible || !lastDraw.milhar) {
+  if (!lastDraw || !lastDraw.milhar) {
     return null;
   }
 
@@ -115,7 +115,7 @@ export const LastDrawResultCard: React.FC<LastDrawResultCardProps> = ({ lastDraw
           )}
 
           <p className="text-[9px] text-slate-500 mt-1.5">
-            Dados salvos até Segunda-feira às 10:00h
+            Resultado oficial do sorteio anterior
           </p>
         </div>
 
